@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 from pyscf import gto
 from pyscf import scf
 
