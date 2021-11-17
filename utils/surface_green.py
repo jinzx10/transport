@@ -69,8 +69,8 @@ def LopezSancho1984(z, H00, H01, S00 = None, S01 = None, max_iter = 50, conv_thr
             #print('convergence achieved after ', i, ' iterations')
             return np.linalg.inv(z*S00-H00+(z*S01-H01)@T)
 
-        t = np.copy(t_new)
-        tt = np.copy(tt_new)
+        t = t_new
+        tt = tt_new
         tt_cumprod = tt_cumprod @ tt
 
     print("Surface Green's function calculation fails to converge.")
@@ -97,7 +97,8 @@ def LopezSancho1985(z, H00, H01, S00 = None, S01 = None, max_iter = 50, conv_thr
     epsilon_s = H00
 
     for i in range(0, max_iter):
-        if np.linalg.norm(alpha) < conv_thr:
+        if np.max(abs(alpha)) < conv_thr:
+        #if np.linalg.norm(alpha) < conv_thr:
             return np.linalg.inv(z*S00-epsilon_s)
 
         iga = np.linalg.solve(z*S00-epsilon, alpha)

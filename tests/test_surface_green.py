@@ -1,5 +1,8 @@
 import numpy as np
-import time
+import time, sys, os
+
+sys.path.append(os.path.dirname(__file__)+'/../utils')
+
 from surface_green import LopezSancho1984, LopezSancho1985
 
 def matgen(M00, M01, nb):
@@ -33,7 +36,7 @@ np.set_printoptions(precision=3, linewidth=200)
 z = np.random.randn() + 1j * np.random.randn()
 
 sz_blk = 3
-n_blk = 4
+n_blk = 400
 sz_tot = sz_blk * n_blk
 
 # generate a random Hamiltonian
@@ -41,12 +44,12 @@ H00 = np.random.randn(sz_blk, sz_blk) + 1j * np.random.randn(sz_blk, sz_blk)
 H00 = (H00+H00.T.conj())/2
 H01 = np.random.randn(sz_blk, sz_blk) * 0.05 + 1j * np.random.randn(sz_blk, sz_blk) * 0.05
 H = matgen(H00, H01, n_blk)
-print(H)
+#print(H)
 
 # generate a random basis overlap matrix
-M = np.random.randn(sz_blk, sz_blk)
-Q, R = np.linalg.qr(M)
-S00 = Q @ np.diag(np.random.rand(sz_blk)) @ Q.T
+M = np.random.randn(sz_blk, sz_blk) + 1j * np.random.randn(sz_blk, sz_blk)
+Q, _ = np.linalg.qr(M)
+S00 = Q @ np.diag(np.random.rand(sz_blk)) @ Q.T.conj()
 S01 = np.random.rand(sz_blk, sz_blk) * 0.1 + 1j * np.random.rand(sz_blk, sz_blk) * 0.2
 S = matgen(S00, S01, n_blk)
 #print(S)
@@ -55,20 +58,18 @@ S = matgen(S00, S01, n_blk)
 start = time.time()
 G = np.linalg.inv(z*S-H)
 G00 = G[0:sz_blk, 0:sz_blk]
-print(time.time()-start)
+print('exact', '\ntime elapsed = ', time.time()-start, ' seconds\n')
 
 # Lopez Sancho algorithms
 start = time.time()
 g84 = LopezSancho1984(z, H00, H01, S00, S01)
-print(time.time()-start)
+print('Lopez Sancho 1984','\ntime elapsed = ', time.time()-start, ' seconds')
+print('error = ', np.linalg.norm(G00-g84), '\n')
 
 start = time.time()
 g85 = LopezSancho1985(z, H00, H01, S00, S01)
-print(time.time()-start)
+print('Lopez Sancho 1985','\ntime elapsed = ', time.time()-start, ' seconds')
+print('error = ', np.linalg.norm(G00-g85), '\n')
 
-
-print('exact\n', G00, '\n')
-print('Lopez Sancho 1984\n', g84, '\n')
-print('Lopez Sancho 1985\n', g85, '\n')
 
 
