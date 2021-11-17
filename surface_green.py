@@ -91,7 +91,22 @@ def LopezSancho1985(z, H00, H01, S00 = None, S01 = None, max_iter = 50, conv_thr
     if S01 is None:
         S01 = np.zeros((sz,sz))
 
+    alpha = -z*S01 + H01
+    beta = -z*S01.T.conj() + H01.T.conj()
+    epsilon = H00
+    epsilon_s = H00
 
+    for i in range(0, max_iter):
+        if np.linalg.norm(alpha) < conv_thr:
+            return np.linalg.inv(z*S00-epsilon_s)
+
+        iga = np.linalg.solve(z*S00-epsilon, alpha)
+        igb = np.linalg.solve(z*S00-epsilon, beta)
+
+        epsilon_s = epsilon_s + alpha @ igb
+        epsilon = epsilon + alpha @ igb + beta @ iga
+        alpha = alpha @ iga
+        beta = beta @ igb
 
     print("Surface Green's function calculation fails to converge.")
 
