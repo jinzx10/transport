@@ -13,15 +13,16 @@ mol_au.ecp = 'def2-svp'
 #mol_au.ecp = 'cc-pvdz-pp'
 d = 2.9
 
-nat = 12
+nat = 8
 
 mol_au.atom = [ ['Au', (0,0,0)], ]
 mol_au.spin = 1
 mol_au.build()
 
 # basis size of a single atom
+sz_atom = mol_au.nao
+
 S = scf.UHF(mol_au).get_ovlp()
-sz_atom = np.size(S, 0)
 
 
 for i in range(1,nat):
@@ -32,6 +33,7 @@ mol_au.build()
 
 
 uhf_au = scf.UHF(mol_au)
+uhf_au.max_cycle = 500
 ig = uhf_au.init_guess_by_minao(mol=mol_au, breaksym=True)
 ig = ig + 0.5*np.random.randn(*np.shape(ig))
 
