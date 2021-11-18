@@ -137,6 +137,11 @@ prim_vec[2,2] = 2*(h + (nl_contact+2)*np.sqrt(2./3)*a) + shift_dist + 10
 np.savetxt(f, prim_vec, fmt='%17.12f')
 f.write('PRIMCOORD\n')
 f.write(str(np.shape(coor_all)[0])+' 1\n')
-np.savetxt(f, coor_all, fmt='%17.12f')
+
+for i in range(0, np.size(coor_all,0)):
+    f.write('Au ')
+    np.savetxt(f, coor_all[i,:], fmt='%17.12f', newline=' ')
+    f.write('\n')
+
 f.close()
 
