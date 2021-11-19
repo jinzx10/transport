@@ -21,7 +21,9 @@ from transport.utils import *
 natm_blk = 4
 spacing = 2.9
 
-for nblk in range(3, 12, 2): # a minimum of 3 blocks to enable the calculation of S00, S01, S02
+for nblk in range(3, 12, 2): 
+    # use a minimum of 3 blocks to enable the calculation of next-nearest neighboring coupling
+    # use an odd number of blocks to keep consistency
 
     natm = natm_blk * nblk
     mol_chain = ezbuild('Au', natm, spacing, basis='def2-svp', ecp='def2-svp')
@@ -39,8 +41,8 @@ for nblk in range(3, 12, 2): # a minimum of 3 blocks to enable the calculation o
     F = rhf_chain.get_fock()
 
     im = nblk // 2
-    F01 = F[(im-1)*sz_blk:    im*sz_blk,     im*sz_blk:(im+1)*sz_blk]
     F00 = F[    im*sz_blk:(im+1)*sz_blk,     im*sz_blk:(im+1)*sz_blk]
+    F01 = F[(im-1)*sz_blk:    im*sz_blk,     im*sz_blk:(im+1)*sz_blk]
     F02 = F[(im-1)*sz_blk:    im*sz_blk, (im+1)*sz_blk:(im+2)*sz_blk]
 
     ezsave(F00, 'data/F00_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
