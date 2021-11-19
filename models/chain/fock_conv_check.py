@@ -1,58 +1,56 @@
-###########################################################
-#
-###########################################################
+'''
+This script does RHF calculations for finite 1-D gold atomic chains and
+checks the convergence of the Fock matrix with respect to the chain length.
+'''
 
-from pyscf import gto
+from pyscf import gto, scf
 from pyscf import scf
 
 import numpy as np
-import sys, time
 
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
-def build_chain(N, spacing=2.9, basis='def2-svp', ecp='def2-svp'):
-    '''
-    return a gto.Mole() object that contains a 1-D chain of N gold atoms
-    '''
-    mol = gto.Mole()
-    mol.basis = basis
-    mol.ecp = ecp
+import sys, time, os
 
-    for i in range(0, N):
-        mol.atom.append(['Au', (0,0,i*spacing)])
+dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(dir+'/../../../')
 
-    mol.spin = N % 2
-    mol.build()
+from transport.utils import *
 
-    return mol
+natm_blk = 4
+spacing = 2.9
 
+for nblk in range(3, 12, 2): # a minimum of 3 blocks to enable the calculation of S00, S01, S02
 
-def save2txt(M, filename):
-    f = open(filename, 'w')
-    np.savetxt(f, M, fmt='%17.12f')
-    f.close()
-
-
-for nat in range(2, 50, 2):
-
-    mol_chain = build_chain(nat)
+    natm = natm_blk * nblk
+    mol_chain = ezbuild('Au', natm, spacing, basis='def2-svp', ecp='def2-svp')
 
     rhf_chain = scf.RHF(mol_chain)
+    sz_blk = mol_chain.nao // nblk # basis size of a block
     rhf_chain.max_cycle = 500
 
     start = time.time()
     rhf_chain.kernel()
-    print('energy per atom = ' + str(rhf_chain.energy_tot()/nat) + ' Hartrees')
+    print('energy per atom = ' + str(rhf_chain.energy_tot()/natm) + ' Hartrees')
     print('time elapsed = ' + str(time.time()-start) + ' seconds')
+    print('\n')
 
-    sz_atom = mol_chain.nao // nat # basis size of a single atom
     F = rhf_chain.get_fock()
 
-    im = nat // 2
-    F00 = F[im*sz_atom:(im+1)*sz_atom, im*sz_atom:(im+1)*sz_atom]
-    F01 = F[(im-1)*sz_atom:im*sz_atom, im*sz_atom:(im+1)*sz_atom]
+    im = nblk // 2
+    F01 = F[(im-1)*sz_blk:    im*sz_blk,     im*sz_blk:(im+1)*sz_blk]
+    F00 = F[    im*sz_blk:(im+1)*sz_blk,     im*sz_blk:(im+1)*sz_blk]
+    F02 = F[(im-1)*sz_blk:    im*sz_blk, (im+1)*sz_blk:(im+2)*sz_blk]
 
-    save2txt(F00, 'data/F00_'+str(nat).zfill(2)+'.txt')
-    save2txt(F01, 'data/F01_'+str(nat).zfill(2)+'.txt')
+    ezsave(F00, 'data/F00_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+    ezsave(F01, 'data/F01_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+    ezsave(F02, 'data/F02_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+
+# save the basis overlap matrix
+S = rhf_chain.get_ovlp()
+ezsave(S[0:sz_blk,        0:  sz_blk], dir+'/data/S00.txt')
+ezsave(S[0:sz_blk,   sz_blk:2*sz_blk], dir+'/data/S01.txt')
+ezsave(S[0:sz_blk, 2*sz_blk:3*sz_blk], dir+'/data/S02.txt')
+
 

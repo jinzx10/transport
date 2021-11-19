@@ -1,77 +1,57 @@
 #!/usr/bin/python
 
 #==========================================================
-# transport calculation for a toy model:
-# a molecule sits between two gold atom chains
+# This script considers a 1-D gold atomic chain
 #
-# ...-Au-Au-N-O-Au-Au-...
+# ...-Au-Au-Au-Au-...
 #
-# this script checks whether a certain block size forms 
-# a good principal layer, i.e., whether there is significant
-# overlap between non-neighboring blocks
+# and checks, given a certain block size, whether there is 
+# significant basis overlap between non-neighboring blocks.
 #==========================================================
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
-from pyscf import gto
-from pyscf import scf
+from pyscf import gto, scf
 import sys, os
 
-
 dir = os.path.dirname(os.path.abspath(__file__))
-sys.path
+sys.path.append(dir+'/../../../')
 
-# number of atoms per principal layer
-block_size = 4
+from transport.utils import *
+
+# number of atoms per block (principal layer)
+natm_blk = int(sys.argv[1])
 
 # distance between two gold atoms in the chain
 d = 2.9
 
-mol_au = gto.Mole()
-mol_au.basis = 'def2-svp'
-
-mol_au.atom = [ ['Au', (0,0,0)], ]
-mol_au.spin = 1
-mol_au.build()
-
-# basis size of a single atom
-S = scf.UHF(mol_au).get_ovlp()
-sz_atom = np.size(S, 0)
-
-# build a molecule object that contains 3 blocks
-for i in range(1, 3*block_size):
-    mol_au.atom.append(['Au', (0, 0, i*d)])
-
-mol_au.spin = (3*block_size) % 2
-mol_au.build()
+# build gto.Mole() object
+mol_au_chain = ezbuild('Au', natm_blk*3, d, basis='def2-svp', ecp='def2-svp')
 
 # overlap matrix for 3 blocks
-S = scf.UHF(mol_au).get_ovlp()
+S = scf.UHF(mol_au_chain).get_ovlp()
 
 # check the quality of block tri-diagonal structure of S
-sz_block = sz_atom * block_size
+sz_block = np.size(S,0) // 3
 S00 = S[0:sz_block, 0:sz_block]
 S01 = S[0:sz_block, sz_block:2*sz_block]
 S02 = S[0:sz_block, 2*sz_block:3*sz_block]
 
 print('max(abs(S02)) = ', np.max(abs(S02)) )
+print('sz_block = ', sz_block)
 
-# save S00 and S01
-f = open(dir+'/data/S00.txt', 'w')
-np.savetxt(f, S00, fmt='%17.12f')
-f.close()
-
-f = open(dir+'/data/S01.txt', 'w')
-np.savetxt(f, S01, fmt='%17.12f')
-f.close()
+## save S00, S01, S02
+#ezsave(S00, dir+'/data/S00.txt')
+#ezsave(S01, dir+'/data/S01.txt')
+#ezsave(S02, dir+'/data/S02.txt')
 
 # replace the zeros by some finite small number (in order to visualize S with a log scale)
-S2 = np.copy(S)
-S2 = np.where(abs(S2) < 1e-16, 1e-16, S2)
+Splot = np.copy(S)
+Splot = np.where(abs(Splot) < 1e-16, 1e-16, Splot)
 
 # visualize S
-im = plt.imshow(S2, cmap=cm.rainbow, norm=colors.LogNorm())
+im = plt.imshow(Splot, cmap=cm.rainbow, norm=colors.LogNorm())
 plt.colorbar(im)
 
 plt.show()
