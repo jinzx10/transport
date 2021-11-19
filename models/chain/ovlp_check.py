@@ -18,10 +18,12 @@ from pyscf import gto
 from pyscf import scf
 import sys, os
 
+
 dir = os.path.dirname(os.path.abspath(__file__))
+sys.path
 
 # number of atoms per principal layer
-block_size = 3
+block_size = 4
 
 # distance between two gold atoms in the chain
 d = 2.9
