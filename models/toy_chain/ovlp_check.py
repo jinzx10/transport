@@ -16,6 +16,9 @@ import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from pyscf import gto
 from pyscf import scf
+import sys, os
+
+dir = os.path.dirname(os.path.abspath(__file__))
 
 # number of atoms per principal layer
 block_size = 3
@@ -24,7 +27,7 @@ block_size = 3
 d = 2.9
 
 mol_au = gto.Mole()
-mol_au.basis = 'cc-pvdz-pp'
+mol_au.basis = 'def2-svp'
 
 mol_au.atom = [ ['Au', (0,0,0)], ]
 mol_au.spin = 1
@@ -46,10 +49,20 @@ S = scf.UHF(mol_au).get_ovlp()
 
 # check the quality of block tri-diagonal structure of S
 sz_block = sz_atom * block_size
+S00 = S[0:sz_block, 0:sz_block]
 S01 = S[0:sz_block, sz_block:2*sz_block]
 S02 = S[0:sz_block, 2*sz_block:3*sz_block]
 
 print('max(abs(S02)) = ', np.max(abs(S02)) )
+
+# save S00 and S01
+f = open(dir+'/data/S00.txt', 'w')
+np.savetxt(f, S00, fmt='%17.12f')
+f.close()
+
+f = open(dir+'/data/S01.txt', 'w')
+np.savetxt(f, S01, fmt='%17.12f')
+f.close()
 
 # replace the zeros by some finite small number (in order to visualize S with a log scale)
 S2 = np.copy(S)

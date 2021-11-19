@@ -1,13 +1,16 @@
 import numpy as np
 import time, sys, os
 
-sys.path.append(os.path.dirname(__file__)+'/../utils')
+sys.path.append(os.path.dirname(os.path.abspath(__file__))+'/../../../')
 
-from surface_green import LopezSancho1984, LopezSancho1985
+from transport.utils.surface_green import LopezSancho1984, LopezSancho1985
+
 
 def matgen(M00, M01, nb):
     '''
-    Generate a block tri-diagonal Hermitian matrix from M00 (diagonal) and M01 (off-diagonal)
+    Generate a block tri-diagonal Hermitian matrix from M00 and M01
+    where M00 is used as the diagonal blocks and M01 the off-diagonal blocks
+    M00 is supposed to be Hermitian
     '''
     sz_blk = np.size(M00, 0);
     sz = sz_blk * nb;
@@ -35,8 +38,18 @@ np.set_printoptions(precision=3, linewidth=200)
 # (zS-H)*G=I
 z = np.random.randn() + 1j * np.random.randn()
 
-sz_blk = 3
-n_blk = 400
+# block size
+if len(sys.argv) < 2:
+    sz_blk = 30
+else:
+    sz_blk = int(sys.argv[1])
+
+# number of blocks
+if len(sys.argv) < 3:
+    n_blk = 50
+else:
+    n_blk = int(sys.argv[2])
+
 sz_tot = sz_blk * n_blk
 
 # generate a random Hamiltonian
@@ -62,14 +75,18 @@ print('exact', '\ntime elapsed = ', time.time()-start, ' seconds\n')
 
 # Lopez Sancho algorithms
 start = time.time()
-g84 = LopezSancho1984(z, H00, H01, S00, S01)
+g84 = LopezSancho1984(z, H00, H01, S00, S01, conv_thr=1e-12)
 print('Lopez Sancho 1984','\ntime elapsed = ', time.time()-start, ' seconds')
-print('error = ', np.linalg.norm(G00-g84), '\n')
+
+if g84 is not None:
+    print('error = ', np.linalg.norm(G00-g84), '\n')
 
 start = time.time()
-g85 = LopezSancho1985(z, H00, H01, S00, S01)
+g85 = LopezSancho1985(z, H00, H01, S00, S01, conv_thr=1e-12)
 print('Lopez Sancho 1985','\ntime elapsed = ', time.time()-start, ' seconds')
-print('error = ', np.linalg.norm(G00-g85), '\n')
+
+if g85 is not None:
+    print('error = ', np.linalg.norm(G00-g85), '\n')
 
 
 
