@@ -21,7 +21,7 @@ from transport.utils import *
 natm_blk = 4
 spacing = 2.9
 
-for nblk in range(3, 12, 2): 
+for nblk in range(3, 4, 2): 
     # use a minimum of 3 blocks to enable the calculation of next-nearest neighboring coupling
     # use an odd number of blocks to keep consistency
 

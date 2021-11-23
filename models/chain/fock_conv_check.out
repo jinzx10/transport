@@ -1,74 +1,32 @@
-converged SCF energy = -269.587270719355
-energy per atom = -134.79363535967747 Hartrees
-time elapsed = 0.2428697869181633 seconds
-converged SCF energy = -539.175848312094
-energy per atom = -134.79396207802358 Hartrees
-time elapsed = 1.2294197082519531 seconds
-converged SCF energy = -808.764432033206
-energy per atom = -134.79407200553433 Hartrees
-time elapsed = 5.562888503074646 seconds
-converged SCF energy = -1078.35299761222
-energy per atom = -134.79412470152752 Hartrees
-time elapsed = 11.167180337011814 seconds
-converged SCF energy = -1347.94152863845
-energy per atom = -134.79415286384614 Hartrees
-time elapsed = 18.38497219234705 seconds
 converged SCF energy = -1617.5300344641
-energy per atom = -134.79416953867673 Hartrees
-time elapsed = 26.997091077268124 seconds
-converged SCF energy = -1887.11852306173
-energy per atom = -134.79418021869625 Hartrees
-time elapsed = 40.55326862633228 seconds
-converged SCF energy = -2156.7069999215
-energy per atom = -134.79418749509472 Hartrees
-time elapsed = 59.80243153870106 seconds
-converged SCF energy = -2426.29546860652
-energy per atom = -134.79419270036468 Hartrees
-time elapsed = 77.4701850488782 seconds
+energy per atom = -134.79416953867695 Hartrees
+time elapsed = 26.61048226058483 seconds
+
+
 converged SCF energy = -2695.88393144358
-energy per atom = -134.79419657217971 Hartrees
-time elapsed = 104.97287928313017 seconds
-converged SCF energy = -2965.47238998722
-energy per atom = -134.7941995448751 Hartrees
-time elapsed = 119.71988306194544 seconds
-converged SCF energy = -3235.06084530491
-energy per atom = -134.7942018877047 Hartrees
-time elapsed = 144.72343787550926 seconds
-converged SCF energy = -3504.64929815017
-energy per atom = -134.79420377500747 Hartrees
-time elapsed = 190.40026825666428 seconds
+energy per atom = -134.79419657218025 Hartrees
+time elapsed = 101.38846214860678 seconds
+
+
 converged SCF energy = -3774.23774906836
-energy per atom = -134.7942053238699 Hartrees
-time elapsed = 221.31104181706905 seconds
-converged SCF energy = -4043.82619846236
-energy per atom = -134.79420661541317 Hartrees
-time elapsed = 283.10134822130203 seconds
-converged SCF energy = -4313.41464663799
-energy per atom = -134.79420770743857 Hartrees
-time elapsed = 285.9519657790661 seconds
-converged SCF energy = -4583.00309382679
-energy per atom = -134.794208641969 Hartrees
-time elapsed = 469.75243916362524 seconds
+energy per atom = -134.7942053238697 Hartrees
+time elapsed = 214.68942864239216 seconds
+
+
 SCF not converged.
-SCF energy = -4852.53078499812
-energy per atom = -134.7925218055301 Hartrees
-time elapsed = 6523.645688340068 seconds
-converged SCF energy = -5122.17998593488
-energy per atom = -134.79421015618504 Hartrees
-time elapsed = 703.2162366881967 seconds
-SCF not converged.
-SCF energy = -5391.70578802813
-energy per atom = -134.79264470070635 Hartrees
-time elapsed = 8210.76745209843 seconds
-converged SCF energy = -5661.35687582863
-energy per atom = -134.7942113292549 Hartrees
-time elapsed = 799.7087203338742 seconds
-converged SCF energy = -5930.945320168
-energy per atom = -134.79421182200286 Hartrees
-time elapsed = 976.1680604591966 seconds
-converged SCF energy = -6200.53376418417
-energy per atom = -134.79421226487761 Hartrees
-time elapsed = 1138.245473369956 seconds
-converged SCF energy = -6470.12220793027
-energy per atom = -134.79421266522058 Hartrees
-time elapsed = 1209.2443042770028 seconds
+SCF energy = -4852.52874443906
+energy per atom = -134.79246512333646 Hartrees
+time elapsed = 6343.313945628703 seconds
+
+
+converged SCF energy = -5930.94532016634
+energy per atom = -134.79421182196646 Hartrees
+time elapsed = 1037.2422773092985 seconds
+
+
+Traceback (most recent call last):
+  File "/home/zuxin/projects/transport/models/chain//fock_conv_check.py", line 54, in <module>
+    ezsave(S[0:sz_blk,        0:  sz_blk], dir+'/data/S00.txt')
+  File "/home/zuxin/projects/transport/utils/npsave.py", line 4, in ezsave
+    f = open(filename, 'w')
+FileNotFoundError: [Errno 2] No such file or directory: '/home/zuxin/projects/transport/utils/data/S00.txt'

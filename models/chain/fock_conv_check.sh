@@ -11,7 +11,7 @@
 source $HOME/.bashrc
 conda activate
 
-dir=$HOME/projects/transport/models/toy_chain/
+dir=$HOME/projects/transport/models/chain/
 cd $dir
 
 python $dir/fock_conv_check.py
