@@ -21,16 +21,16 @@ from transport.utils import *
 natm_blk = 4
 spacing = 2.9
 
-for nblk in range(3, 4, 2): 
+for nblk in range(3, 12, 2): 
     # use a minimum of 3 blocks to enable the calculation of next-nearest neighboring coupling
     # use an odd number of blocks to keep consistency
 
     natm = natm_blk * nblk
     mol_chain = ezbuild('Au', natm, spacing, basis='def2-svp', ecp='def2-svp')
 
-    rhf_chain = scf.RHF(mol_chain)
+    rhf_chain = scf.RHF(mol_chain).newton()
     sz_blk = mol_chain.nao // nblk # basis size of a block
-    rhf_chain.max_cycle = 500
+    rhf_chain.max_cycle = 1000
 
     start = time.time()
     rhf_chain.kernel()
@@ -45,9 +45,9 @@ for nblk in range(3, 4, 2):
     F01 = F[(im-1)*sz_blk:    im*sz_blk,     im*sz_blk:(im+1)*sz_blk]
     F02 = F[(im-1)*sz_blk:    im*sz_blk, (im+1)*sz_blk:(im+2)*sz_blk]
 
-    ezsave(F00, 'data/F00_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
-    ezsave(F01, 'data/F01_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
-    ezsave(F02, 'data/F02_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+    ezsave(F00, dir+'/data/F00_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+    ezsave(F01, dir+'/data/F01_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
+    ezsave(F02, dir+'/data/F02_'+str(natm_blk)+'_'+str(nblk).zfill(2)+'.txt')
 
 # save the basis overlap matrix
 S = rhf_chain.get_ovlp()

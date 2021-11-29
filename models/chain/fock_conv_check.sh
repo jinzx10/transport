@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --output=fock_conv_check.out
-#SBATCH --partition=serial
+#SBATCH --partition=smallmem,parallel,serial
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00
 #SBATCH --ntasks-per-node=1

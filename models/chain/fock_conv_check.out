@@ -1,32 +1,25 @@
-converged SCF energy = -1617.5300344641
+converged SCF energy = -1617.53003446415
 energy per atom = -134.79416953867695 Hartrees
-time elapsed = 26.61048226058483 seconds
+time elapsed = 84.57232945412397 seconds
 
 
-converged SCF energy = -2695.88393144358
-energy per atom = -134.79419657218025 Hartrees
-time elapsed = 101.38846214860678 seconds
+converged SCF energy = -2695.8839314437
+energy per atom = -134.79419657217943 Hartrees
+time elapsed = 279.03281071037054 seconds
 
 
-converged SCF energy = -3774.23774906836
-energy per atom = -134.7942053238697 Hartrees
-time elapsed = 214.68942864239216 seconds
+converged SCF energy = -3774.23774906839
+energy per atom = -134.79420532386817 Hartrees
+time elapsed = 677.9418564364314 seconds
 
 
-SCF not converged.
-SCF energy = -4852.52874443906
-energy per atom = -134.79246512333646 Hartrees
-time elapsed = 6343.313945628703 seconds
+converged SCF energy = -4852.5915402119
+energy per atom = -134.79420945032786 Hartrees
+time elapsed = 1567.8485639467835 seconds
 
 
-converged SCF energy = -5930.94532016634
-energy per atom = -134.79421182196646 Hartrees
-time elapsed = 1037.2422773092985 seconds
+converged SCF energy = -5930.9453201683
+energy per atom = -134.7942118220033 Hartrees
+time elapsed = 4505.272435247898 seconds
 
 
-Traceback (most recent call last):
-  File "/home/zuxin/projects/transport/models/chain//fock_conv_check.py", line 54, in <module>
-    ezsave(S[0:sz_blk,        0:  sz_blk], dir+'/data/S00.txt')
-  File "/home/zuxin/projects/transport/utils/npsave.py", line 4, in ezsave
-    f = open(filename, 'w')
-FileNotFoundError: [Errno 2] No such file or directory: '/home/zuxin/projects/transport/utils/data/S00.txt'
