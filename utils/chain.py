@@ -11,7 +11,7 @@ def ezbuild(atom, N, spacing, basis='sto-3g', ecp='sto-3g'):
     for i in range(0, N):
         mol.atom.append([atom, (0,0,i*spacing)])
 
-    mol.spin = N % 2
+    mol.spin = mol.nelectron % 2
     mol.build()
 
     return mol
