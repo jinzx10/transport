@@ -1,6 +1,9 @@
 import numpy as np
-from diis import diis as idiis
 from pyscf.lib import diis 
+import sys, os
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__))+'/../../../')
+from transport.utils import diis as idiis
 
 def F2F(F_in, h, U, n_occ):
     val, vec = np.linalg.eigh(F_in)
@@ -36,12 +39,10 @@ tol = 1e-7
 max_diis = 50
 conv, F = idiis(f2f, h, conv_tol = tol, max_iter = max_diis, max_subspace_size=6)
 
-print(conv)
-
 adiis = diis.DIIS()
 P = np.zeros((sz,sz))
 
-for i in range(0,max_diis):
+for i in range(0, max_diis):
 
     F = np.copy(h)
     F[0,0] += U*P[0,0]
@@ -53,10 +54,14 @@ for i in range(0,max_diis):
         err = np.linalg.norm(dF,1)
         print('err = ', err)
         if err < tol and i > 3:
+            print('convergence achieved in', i, 'steps')
             break
         F = F_new
 
     val, vec = np.linalg.eigh(F)
     P = vec[:,:n_occ] @ vec[:,:n_occ].T
+
+    if i == max_diis-1:
+        print('convergence failed')
 
 
