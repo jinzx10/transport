@@ -35,7 +35,8 @@ def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 15):
     for counter in range(0, max_iter):
         # Pulay mixing
         # use pseudo-inverse to handle possible singularity of the DIIS matrix
-        c = np.linalg.pinv(diis_mat()) @ np.append(np.zeros(np.size(B,0)), 1.0)
+        c = np.linalg.lstsq(diis_mat(), np.append(np.zeros(np.size(B,0)), 1.0), rcond=1e-12)[0]
+        #c = np.linalg.pinv(diis_mat()) @ np.append(np.zeros(np.size(B,0)), 1.0)
         x_mix = np.reshape( c[:-1] @ xs, np.shape(x0) )
 
         x, r = g(x_mix)
