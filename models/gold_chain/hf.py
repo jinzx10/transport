@@ -24,31 +24,40 @@ for nat in range(4, 21):
     
     cell.exp_to_discard = 0.1
     cell.spin = (nat+1) % 2
+    cell.ke_cutoff = 200
+    cell.max_memory = 100000
 
     cell.build(    
             unit = 'angstrom',    
             a = [[l+r+(nl+nr-1)*a,0,0],[0,1,0],[0,0,1]],    
             dimension = 1,    
-            basis = {'Au':'def2-svp', 'Cu':'def2-svp'},
-            ecp = {'Au':'def2-svp'},
+            basis = {'Au':'def2-svp', 'Cu':'lanl2dz'},
+            ecp = {'Au':'def2-svp', 'Cu':'lanl2dz'},
             verbose = 4,
-            precision=1e-6
             ) 
 
     # Gamma point calculation
 
-    # unrestricted
+    #================ unrestricted ================
     mf = scf.UHF(cell).density_fit()    
-    mf.chkfile = 'uhf_'+str(nat)+'.chk'
-    mf.with_df._cderi_to_save = 'uhf_cderi_'+str(nat)+'.h5'
+    mf.chkfile = 'data/uhf_'+str(nat).zfill(2)+'.chk'
+    mf.with_df._cderi_to_save = 'data/uhf_cderi_'+str(nat).zfill(2)+'.h5'
     
-    e = mf.kernel()
+    # scf solver
+    mf = mf.newton()
+    mf.max_cycle = 500
 
-    # restricted
+    # initial guess
+    ig = mf.get_init_guess()
+    ig[1,:,:] = 0
+
+    e = mf.kernel(dm0=ig)
+
+    #================ restricted ================
     if nat % 2 == 1:
         mf = scf.RHF(cell).density_fit()    
-        mf.chkfile = 'rhf_'+str(nat)+'.chk'
-        mf.with_df._cderi_to_save = 'rhf_cderi_'+str(nat)+'.h5'
+        mf.chkfile = 'data/rhf_'+str(nat).zfill(2)+'.chk'
+        mf.with_df._cderi_to_save = 'data/rhf_cderi_'+str(nat).zfill(2)+'.h5'
         
         e = mf.kernel()
         

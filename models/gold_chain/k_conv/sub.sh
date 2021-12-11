@@ -1,17 +1,26 @@
 #!/bin/bash
 
-#SBATCH --output=k_conv.out
+#SBATCH --output=slurm.out
 #SBATCH --partition=smallmem
 #SBATCH --nodes=1
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=28
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=40G
 
 source $HOME/.bashrc
 conda activate
 
-dir=/home/zuxin/projects/transport/models/gold_chain/k_conv
+dir=$HOME/projects/transport/models/gold_chain/k_conv
 cd $dir
 
-python $dir/hf.py
+timestamp=`date +%Y%m%d%H%M%S`
+savedir="data-${timestamp}"
+output="k_conv_${timestamp}.out"
+
+echo `date`
+echo "savedir=${savedir}"
+
+mkdir -p ${savedir}
+python $dir/hf.py --savedir=${savedir} > ${output}
 

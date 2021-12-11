@@ -13,6 +13,8 @@ for nat in range(2,22,2):
 
     cell.exp_to_discard = 0.1
     cell.spin = cell.nelectron % 2
+    cell.ke_cutoff = 200
+    cell.max_memory = 100000
 
     cell.build(    
             unit = 'angstrom',    
@@ -20,7 +22,7 @@ for nat in range(2,22,2):
             dimension = 1,    
             basis = 'def2-svp',    
             ecp = 'def2-svp',
-            verbose=4
+            verbose=4,
             )    
         
     # number of k points
@@ -28,22 +30,41 @@ for nat in range(2,22,2):
     kpts = cell.make_kpts([nks,1,1], scaled_center=[0,0,0])
     print('k points = ', kpts)
     
-    # unrestricted
-    mf = scf.KUHF(cell).density_fit()    
-
+    #================ unrestricted ================
+    mf = scf.KUHF(cell).density_fit()
     mf.kpts = kpts
-    mf.chkfile = 'uhf_'+str(nat)+'_'+str(nks)+'.chk'
-    mf.with_df._cderi_to_save = 'uhf_cderi_'+str(nat)+'_'+str(nks)+'.h5'
+
+    # data file
+    mf.chkfile = 'data/uhf_'+str(nat)+'_'+str(nks)+'.chk'
+    mf.with_df._cderi_to_save = 'data/uhf_cderi_'+str(nat)+'_'+str(nks)+'.h5'
     
-    e = mf.kernel()    
+    # scf solver
+    mf = mf.newton()
+    mf.max_cycle = 500
+
+    # initial guess
+    ig = mf.get_init_guess()
+    ig[1,:,:,:] = 0
+
+    e = mf.kernel(dm0=ig)    
+    #e = mf.kernel()    
+
     print('uhf energy per atom = ', e/nat)    
 
-    # restricted
+    #================ restricted ================
     mf = scf.KRHF(cell).density_fit()    
-
     mf.kpts = kpts
-    mf.chkfile = 'rhf_'+str(nat)+'_'+str(nks)+'.chk'
-    mf.with_df._cderi_to_save = 'rhf_cderi_'+str(nat)+'_'+str(nks)+'.h5'
+
+    # data file
+    mf.chkfile = 'data/rhf_'+str(nat)+'_'+str(nks)+'.chk'
+    mf.with_df._cderi_to_save = 'data/rhf_cderi_'+str(nat)+'_'+str(nks)+'.h5'
     
+    # scf solver
+    mf = mf.newton()
+    mf.max_cycle = 500
+
     e = mf.kernel()    
+
     print('rhf energy per atom = ', e/nat)    
+
+
