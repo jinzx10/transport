@@ -3,7 +3,7 @@ from pyscf.pbc import scf, gto
 import matplotlib.pyplot as plt
 import numpy as np
 
-a=2.9
+a = 2.9
 nat = 2
 
 cell = gto.Cell()    
@@ -12,7 +12,6 @@ for iat in range(0, nat):
     cell.atom.append(['Au', (iat*a, 0, 0)])
 
 cell.exp_to_discard = 0.1
-cell.spin = cell.nelectron % 2
 
 cell.build(    
         unit = 'angstrom',    
@@ -26,13 +25,15 @@ cell.build(
 rdf = []
 udf = []
 
-for nks in range(2, 22, 2):
+datadir='data-20211210181649'
+
+for nks in range(2, 21, 2):
     kpts = cell.make_kpts([nks,1,1], scaled_center=[0,0,0])    
-    print('kpts = ', kpts)
+    #print('kpts = ', kpts)
 
     # restricted
-    rhf_chk = 'data/rhf_2_' + str(nks) + '.chk'
-    rhf_h5 = 'data/rhf_cderi_2_' + str(nks) + '.h5'
+    rhf_chk = datadir + '/rhf_02_' + str(nks).zfill(2) + '.chk'
+    rhf_h5 = datadir + '/rhf_cderi_02_' + str(nks).zfill(2) + '.h5'
 
     rhf_data = chkfile.load(rhf_chk, 'scf')
     
@@ -50,8 +51,8 @@ for nks in range(2, 22, 2):
     rf_old = rf
 
     # unrestricted
-    uhf_chk = 'data/uhf_2_' + str(nks) + '.chk'
-    uhf_h5 = 'data/uhf_cderi_2_' + str(nks) + '.h5'
+    uhf_chk = datadir + '/uhf_02_' + str(nks).zfill(2) + '.chk'
+    uhf_h5 = datadir + '/uhf_cderi_02_' + str(nks).zfill(2) + '.h5'
 
     uhf_data = chkfile.load(uhf_chk, 'scf')
     

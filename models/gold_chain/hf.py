@@ -1,4 +1,16 @@
 from pyscf.pbc import gto, scf, df    
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--savedir')
+args = parser.parse_args()
+
+savedir = args.savedir
+if savedir is None:
+    savedir = 'data'
+
+print('data will be saved to ', savedir)
+
 
 # spacing between gold atoms
 a = 2.9
@@ -36,12 +48,15 @@ for nat in range(4, 21):
             verbose = 4,
             ) 
 
+    # auxbasis for density fitting
+    ab = df.aug_etb(cell, beta=2.0)
+
     # Gamma point calculation
 
     #================ unrestricted ================
-    mf = scf.UHF(cell).density_fit()    
-    mf.chkfile = 'data/uhf_'+str(nat).zfill(2)+'.chk'
-    mf.with_df._cderi_to_save = 'data/uhf_cderi_'+str(nat).zfill(2)+'.h5'
+    mf = scf.UHF(cell).density_fit(auxbasis=ab)    
+    mf.chkfile = savedir + '/uhf_'+str(nat).zfill(2)+'.chk'
+    mf.with_df._cderi_to_save = savedir + '/uhf_cderi_'+str(nat).zfill(2)+'.h5'
     
     # scf solver
     mf = mf.newton()
@@ -55,10 +70,13 @@ for nat in range(4, 21):
 
     #================ restricted ================
     if nat % 2 == 1:
-        mf = scf.RHF(cell).density_fit()    
-        mf.chkfile = 'data/rhf_'+str(nat).zfill(2)+'.chk'
-        mf.with_df._cderi_to_save = 'data/rhf_cderi_'+str(nat).zfill(2)+'.h5'
+        mf = scf.RHF(cell).density_fit(auxbasis=ab)    
+        mf.chkfile = savedir + '/rhf_'+str(nat).zfill(2)+'.chk'
+        mf.with_df._cderi_to_save = savedir + '/rhf_cderi_'+str(nat).zfill(2)+'.h5'
         
+        mf = mf.newton()
+        mf.max_cycle = 500
+
         e = mf.kernel()
         
 
