@@ -14,7 +14,7 @@ conda activate
 dir=$HOME/projects/transport/models/gold_chain/
 cd ${dir}
 
-timestamp=`date +%Y%m%d%H%M%S`
+timestamp=`date +%y%m%d-%H%M%S`
 savedir="data-${timestamp}"
 output="cu_au_${timestamp}.out"
 
