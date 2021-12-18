@@ -1,20 +1,21 @@
 #!/bin/bash
 
+#SBATCH --partition=serial
 #SBATCH --output=slurm.out
-#SBATCH --partition=smallmem
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=36
-#SBATCH --mem=110G
+#SBATCH --cpus-per-task=28
+#SBATCH --mem=240G
+#SBATCH --job-name=au_chain_hf
 
 source $HOME/.bashrc
 conda activate
 
 dir=$HOME/projects/transport/models/gold_chain/nat_conv
-cd $dir
+cd ${dir}
 
-timestamp=`date +%Y%m%d%H%M%S`
+timestamp=`date +%y%m%d-%H%M%S`
 savedir="data-${timestamp}"
 output="nat_conv_${timestamp}.out"
 
@@ -22,5 +23,5 @@ echo `date`
 echo "savedir=${savedir}"
 
 mkdir -p ${savedir}
-python $dir/hf.py --savedir=${savedir} > ${output}
+python ${dir}/hf.py --savedir=${savedir} > ${output}
 

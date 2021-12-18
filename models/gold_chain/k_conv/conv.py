@@ -3,72 +3,51 @@ from pyscf.pbc import scf, gto
 import matplotlib.pyplot as plt
 import numpy as np
 
-a = 2.9
-nat = 2
-
-cell = gto.Cell()    
-
-for iat in range(0, nat):
-    cell.atom.append(['Au', (iat*a, 0, 0)])
-
-cell.exp_to_discard = 0.1
-
-cell.build(    
-        unit = 'angstrom',    
-        a = [[a*nat,0,0],[0,1,0],[0,0,1]],    
-        dimension = 1,    
-        basis = 'def2-svp',
-        ecp = 'def2-svp',
-        verbose = 0
-        )    
-
 rdf = []
 udf = []
 
-datadir='data-20211210181649'
+datadir='data-211217-182949'
 
-for nks in range(2, 21, 2):
-    kpts = cell.make_kpts([nks,1,1], scaled_center=[0,0,0])    
-    #print('kpts = ', kpts)
+nkmin = 2
+nkmax = 20
+nat = 2
 
-    # restricted
-    rhf_chk = datadir + '/rhf_02_' + str(nks).zfill(2) + '.chk'
-    rhf_h5 = datadir + '/rhf_cderi_02_' + str(nks).zfill(2) + '.h5'
+cell = chkfile.load_cell(datadir + '/au_' + str(nat).zfill(2) + '.chk')
 
-    rhf_data = chkfile.load(rhf_chk, 'scf')
+for nks in range(nkmin, nkmax+1, 2):
+
+    #================ restricted ================
+    rhf = scf.KRHF(cell).density_fit()
+    rhf.with_df._cderi = datadir + '/' + 'rhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
+
+    rhf_data = chkfile.load(datadir + '/rhf_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.chk', 'scf')
+    rhf.__dict__.update(rhf_data)
     
-    rhf = scf.KRHF(cell).density_fit()    
-    rhf.kpts = kpts
-    rhf.with_df._cderi = rhf_h5 
-    
-    rdm1 = rhf.make_rdm1(mo_coeff_kpts=rhf_data['mo_coeff'], mo_occ_kpts=rhf_data['mo_occ'])
-    
-    rf = rhf.get_fock(dm = rdm1)
+    rf = rhf.get_fock()
 
-    if nks > 2:
+    if nks > nkmin:
         rdf.append(np.linalg.norm(rf[0]-rf_old[0]))
 
     rf_old = rf
 
-    # unrestricted
-    uhf_chk = datadir + '/uhf_02_' + str(nks).zfill(2) + '.chk'
-    uhf_h5 = datadir + '/uhf_cderi_02_' + str(nks).zfill(2) + '.h5'
-
-    uhf_data = chkfile.load(uhf_chk, 'scf')
-    
+    #================ unrestricted ================
     uhf = scf.KUHF(cell).density_fit()    
-    uhf.kpts = kpts
-    uhf.with_df._cderi = uhf_h5 
-    
-    rdm1 = uhf.make_rdm1(mo_coeff_kpts=uhf_data['mo_coeff'], mo_occ_kpts=uhf_data['mo_occ'])
-    
-    uf = uhf.get_fock(dm = rdm1)
+    uhf.with_df._cderi = datadir + '/' + 'uhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
 
-    if nks > 2:
+    uhf_data = chkfile.load(datadir + '/uhf_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.chk', 'scf')
+    uhf.__dict__.update(uhf_data)
+    
+    uf = uhf.get_fock()
+
+    if nks > nkmin:
         udf.append(np.linalg.norm(uf[0][0]-uf_old[0][0]))
 
     uf_old = uf
 
+    print(nks, 'done')
 
+print('nks = ', list(range(nkmin, nkmax+1, 2)))
 print('rdf = ', rdf)
 print('udf = ', udf)
+
+
