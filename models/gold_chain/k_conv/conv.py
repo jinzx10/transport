@@ -6,7 +6,7 @@ import numpy as np
 rdf = []
 udf = []
 
-datadir='data-211217-182949'
+datadir='data-211217-183501'
 
 nkmin = 2
 nkmax = 20

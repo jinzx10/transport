@@ -1,6 +1,6 @@
 #######################################################################
 # This script performs KHF calculations for 1-D periodic gold atomic
-# chain with fixed unit and various k-sampling
+# chain with fixed unit cell and various number of k points.
 #######################################################################
 
 from pyscf.pbc import gto, scf, df    
@@ -16,6 +16,8 @@ parser.add_argument('--nat', default = 2, type = int)
 parser.add_argument('--ke_cutoff', default = 200, type = int)
 parser.add_argument('--exp_to_discard', default = 0.1, type = float)
 parser.add_argument('--max_memory', default = 10000, type = int)
+parser.add_argument('--df_beta', default = 2.0, type = float)
+
 args = parser.parse_args()
 
 savedir = args.savedir
@@ -26,6 +28,7 @@ nat = args.nat
 ke_cutoff = args.ke_cutoff
 exp_to_discard = args.exp_to_discard
 max_memory = args.max_memory
+df_beta = args.df_beta
 
 print('data will be saved to ', savedir)
 print('spacing between gold atoms = ', a)
@@ -35,6 +38,7 @@ print('number of atoms per unit cell = ', nat)
 print('kinetic energy cutoff = ', ke_cutoff)
 print('GTO exponent threshold = ', exp_to_discard)
 print('cell max memory = ', max_memory, 'M')
+print('density fitting beta == ', df_beta)
 
 
 cell = gto.Cell()    
@@ -59,7 +63,7 @@ cell.build(
 chkfile.save_cell(cell, savedir + '/au_' + str(nat).zfill(2) + '.chk')
 
 # auxbasis for density fitting
-ab = df.aug_etb(cell, beta=2.0)
+ab = df.aug_etb(cell, beta=df_beta)
 
 # number of k points
 for nks in range(nkmin, nkmax+1, 2):
