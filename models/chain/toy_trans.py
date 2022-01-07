@@ -54,7 +54,9 @@ print('max(abs(S02)) = ', np.max(abs(S02)) )
 im = plt.imshow(S2, cmap=cm.rainbow, norm=colors.LogNorm())
 plt.colorbar(im)
 
-plt.show()
+plt.savefig('Fock.png')
+
+#plt.show()
 
 #f = open('S.txt', 'w')
 #np.savetxt(f, S, fmt='%8.5f')

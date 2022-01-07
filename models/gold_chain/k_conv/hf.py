@@ -17,6 +17,7 @@ parser.add_argument('--ke_cutoff', default = 200, type = int)
 parser.add_argument('--exp_to_discard', default = 0.1, type = float)
 parser.add_argument('--max_memory', default = 10000, type = int)
 parser.add_argument('--df_beta', default = 2.0, type = float)
+parser.add_argument('--smearing', default = 0.01, type = float)
 
 args = parser.parse_args()
 
@@ -29,6 +30,7 @@ ke_cutoff = args.ke_cutoff
 exp_to_discard = args.exp_to_discard
 max_memory = args.max_memory
 df_beta = args.df_beta
+smearing = args.smearing
 
 print('data will be saved to ', savedir)
 print('spacing between gold atoms = ', a)
@@ -38,7 +40,8 @@ print('number of atoms per unit cell = ', nat)
 print('kinetic energy cutoff = ', ke_cutoff)
 print('GTO exponent threshold = ', exp_to_discard)
 print('cell max memory = ', max_memory, 'M')
-print('density fitting beta == ', df_beta)
+print('density fitting beta = ', df_beta)
+print('smearing = ', smearing)
 
 
 cell = gto.Cell()    
@@ -52,8 +55,8 @@ cell.max_memory = max_memory
 
 cell.build(    
         unit = 'angstrom',    
-        a = [[a*nat,0,0],[0,a,0],[0,0,a]],    
-        dimension = 1,    
+        a = [[a*nat,0,0],[0,30,0],[0,0,30]],    
+        dimension = 3,    
         basis = 'def2-svp',
         ecp = 'def2-svp',
         verbose = 4
@@ -80,8 +83,10 @@ for nks in range(nkmin, nkmax+1, 2):
     mf.with_df._cderi_to_save = savedir + '/' + 'uhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
     
     # scf solver
-    mf = mf.newton()
+    #mf = mf.newton()
     mf.max_cycle = 500
+
+    mf = scf.addons.smearing_(mf, sigma=smearing, method="fermi") 
 
     # initial guess
     ig = mf.get_init_guess()
@@ -94,13 +99,16 @@ for nks in range(nkmin, nkmax+1, 2):
     mf = scf.KRHF(cell).density_fit(auxbasis = ab)    
     mf.kpts = kpts
 
+
     # data file
     mf.chkfile = savedir + '/rhf_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.chk'
     mf.with_df._cderi_to_save = savedir + '/' + 'rhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
 
     # scf solver
-    mf = mf.newton()
+    #mf = mf.newton()
     mf.max_cycle = 500
+
+    mf = scf.addons.smearing_(mf, sigma=smearing, method="fermi") 
 
     e = mf.kernel()    
     print('nat = ', nat, '   nks = ', nks, '   rhf energy per atom = ', e/nat)    

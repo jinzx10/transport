@@ -8,10 +8,10 @@ udf = []
 
 datadir='data-211217-150954'
 
-nat_start = 2
+nat_start = 4
 nat_end = 20
 
-for nat in range(nat_start, nat_end+1, 2):
+for nat in range(nat_start, nat_end+1, 4):
 
     cell = chkfile.load_cell(datadir + '/au_' + str(nat).zfill(2) + '.chk')
 
