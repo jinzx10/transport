@@ -6,6 +6,7 @@
 from pyscf.pbc import gto, scf, df    
 from pyscf.pbc.lib import chkfile
 import argparse
+import numpy as np
     
 parser = argparse.ArgumentParser()
 parser.add_argument('--savedir', default = 'data', type = str)
@@ -78,14 +79,11 @@ for nks in range(nkmin, nkmax+1, 2):
     mf = scf.KUHF(cell).density_fit(auxbasis = ab)    
     mf.kpts = kpts
 
-    # data file
+    # scf data & density fitting tensor
     mf.chkfile = savedir + '/uhf_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.chk'
-    mf.with_df._cderi_to_save = savedir + '/' + 'uhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
+    mf.with_df._cderi_to_save = savedir + '/' + 'cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
     
-    # scf solver
-    #mf = mf.newton()
-    mf.max_cycle = 500
-
+    mf.max_cycle = 200
     mf = scf.addons.smearing_(mf, sigma=smearing, method="fermi") 
 
     # initial guess
@@ -93,24 +91,32 @@ for nks in range(nkmin, nkmax+1, 2):
     ig[1,:,:,:] = 0 # spin-symmetry-broken initial guess
 
     e = mf.kernel(dm0=ig)    
+
     print('nat = ', nat, '   nks = ', nks, '   uhf energy per atom = ', e/nat)    
+
+
+    # save Fock matrix
+    fock = mf.get_fock()
+    np.save(savedir + '/' + 'uFock_' + str(nat).zfill(2) + '_' + str(nks).zfill(2) + '.npy', fock)
+
 
     #================ restricted ================
     mf = scf.KRHF(cell).density_fit(auxbasis = ab)    
     mf.kpts = kpts
 
 
-    # data file
+    # scf data & density fitting tensor
     mf.chkfile = savedir + '/rhf_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.chk'
-    mf.with_df._cderi_to_save = savedir + '/' + 'rhf_cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
+    mf.with_df._cderi = savedir + '/' + 'cderi_'+str(nat).zfill(2)+'_'+str(nks).zfill(2)+'.h5'
 
-    # scf solver
-    #mf = mf.newton()
-    mf.max_cycle = 500
-
+    mf.max_cycle = 200
     mf = scf.addons.smearing_(mf, sigma=smearing, method="fermi") 
 
     e = mf.kernel()    
     print('nat = ', nat, '   nks = ', nks, '   rhf energy per atom = ', e/nat)    
+
+    # save Fock matrix
+    fock = mf.get_fock()
+    np.save(savedir + '/' + 'rFock_' + str(nat).zfill(2) + '_' + str(nks).zfill(2) + '.npy', fock)
 
 

@@ -6,6 +6,7 @@
 from pyscf.pbc import gto, scf, df
 from pyscf.pbc.lib import chkfile
 import argparse
+import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--savedir', default = 'data', type = str)
@@ -14,7 +15,7 @@ parser.add_argument('--natmin', default = 2, type = int)
 parser.add_argument('--natmax', default = 20, type = int)
 parser.add_argument('--ke_cutoff', default = 200, type = int)
 parser.add_argument('--exp_to_discard', default = 0.1, type = float)
-parser.add_argument('--max_memory', default = 10000, type = int)
+parser.add_argument('--max_memory', default = 32000, type = int)
 parser.add_argument('--df_beta', default = 2.0, type = float)
 parser.add_argument('--smearing', default = 0.01, type = float)
 args = parser.parse_args()
@@ -58,7 +59,7 @@ for nat in range(natmin, natmax+1, 2):
             basis = 'def2-svp',
             ecp = 'def2-svp',
             verbose = 4,
-            )
+    )
 
     # save cell
     chkfile.save_cell(cell, savedir + '/au_' + str(nat).zfill(2) + '.chk')
@@ -71,7 +72,7 @@ for nat in range(natmin, natmax+1, 2):
 
     # data file
     mf.chkfile = savedir + '/uhf_' + str(nat).zfill(2) + '.chk'
-    mf.with_df._cderi_to_save = savedir + '/uhf_cderi_' + str(nat).zfill(2) + '.h5'
+    mf.with_df._cderi_to_save = savedir + '/cderi_' + str(nat).zfill(2) + '.h5'
 
     # scf solver
     #mf = mf.newton()
@@ -87,12 +88,19 @@ for nat in range(natmin, natmax+1, 2):
 
     print('nat = ', nat, '   uhf energy per atom = ', e/nat)
 
+    # save Fock matrix
+    fock = mf.get_fock()
+    np.save(savedir + '/' + 'uFock_' + str(nat).zfill(2) + '.npy', fock)
+
     #================ restricted ================
     mf = scf.RHF(cell).density_fit(auxbasis = ab)
 
     # data file
     mf.chkfile = savedir + '/rhf_' +str(nat).zfill(2) + '.chk'
-    mf.with_df._cderi_to_save = savedir + '/rhf_cderi_' + str(nat).zfill(2) + '.h5'
+    #mf.with_df._cderi_to_save = savedir + '/rhf_cderi_' + str(nat).zfill(2) + '.h5'
+
+    # use previously calculated density fitting tensor
+    mf.with_df._cderi = savedir + '/cderi_' + str(nat).zfill(2) + '.h5'
 
     # scf solver
     #mf = mf.newton()
@@ -103,5 +111,9 @@ for nat in range(natmin, natmax+1, 2):
     e = mf.kernel()
 
     print('nat = ', nat, '   rhf energy per atom = ', e/nat)
+
+    # save Fock matrix
+    fock = mf.get_fock()
+    np.save(savedir + '/' + 'rFock_' + str(nat).zfill(2) + '.npy', fock)
 
 

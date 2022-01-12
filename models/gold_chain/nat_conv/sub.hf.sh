@@ -23,5 +23,5 @@ echo `date`
 echo "savedir=${savedir}"
 
 mkdir -p ${savedir}
-python ${dir}/hf.py --savedir=${savedir} > ${output}
+python ${dir}/hf.py --savedir=${savedir} --smearing=0.01 > ${output}
 

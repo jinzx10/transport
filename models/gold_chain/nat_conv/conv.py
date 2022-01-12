@@ -2,30 +2,42 @@ from pyscf.pbc.lib import chkfile
 from pyscf.pbc import scf, gto, df
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
 
 rdf = []
 udf = []
 
-datadir='data-211217-150954'
+datadir='data-' + sys.argv[1]
 
-nat_start = 4
+nat_start =12 
 nat_end = 20
+nat_step = 2
 
-for nat in range(nat_start, nat_end+1, 4):
+nat_range = range(nat_start, nat_end+1, nat_step)
+
+for nat in nat_range:
 
     cell = chkfile.load_cell(datadir + '/au_' + str(nat).zfill(2) + '.chk')
+    print('cell', nat, 'loaded')
 
     # indices of the selected (first) atom's AOs in the Fock matrix
     idx_start, idx_end = cell.aoslice_by_atom()[0][2:4]
+    print('idx_start = ', idx_start)
+    print('idx_end = ', idx_end)
 
     #============ restricted ============
-    rhf = scf.RHF(cell).density_fit()
-    rhf.with_df._cderi = datadir + '/rhf_cderi_' + str(nat).zfill(2) + '.h5'
+    mf = scf.RHF(cell).density_fit()
+    print('mf initialized')
+    mf.with_df._cderi = datadir + '/cderi_' + str(nat).zfill(2) + '.h5'
+    print('df cderi loaded')
 
-    rhf_data = chkfile.load(datadir + '/rhf_' + str(nat).zfill(2) + '.chk', 'scf')
-    rhf.__dict__.update(rhf_data)
+    mf_data = chkfile.load(datadir + '/rhf_' + str(nat).zfill(2) + '.chk', 'scf')
+    print('mf data readed')
+    mf.__dict__.update(mf_data)
+    print('mf data updated')
     
-    rf = rhf.get_fock()
+    rf = mf.get_fock()
+    print('fock computed')
 
     if nat > nat_start:
         rdf.append(np.linalg.norm(rf[idx_start:idx_end, idx_start:idx_end]-rf_old[idx_start:idx_end, idx_start:idx_end]))
@@ -33,13 +45,13 @@ for nat in range(nat_start, nat_end+1, 4):
     rf_old = rf
 
     #============ unrestricted ============
-    uhf = scf.UHF(cell).density_fit()    
-    uhf.with_df._cderi = datadir + '/uhf_cderi_' + str(nat).zfill(2) + '.h5'
+    mf = scf.UHF(cell).density_fit()    
+    mf.with_df._cderi = datadir + '/cderi_' + str(nat).zfill(2) + '.h5'
 
-    uhf_data = chkfile.load(datadir + '/uhf_' + str(nat).zfill(2) + '.chk', 'scf')
-    uhf.__dict__.update(uhf_data)
+    mf_data = chkfile.load(datadir + '/uhf_' + str(nat).zfill(2) + '.chk', 'scf')
+    mf.__dict__.update(mf_data)
 
-    uf = uhf.get_fock()
+    uf = mf.get_fock()
 
     if nat > nat_start:
         udf.append(np.linalg.norm(uf[0][idx_start:idx_end, idx_start:idx_end]-uf_old[0][idx_start:idx_end, idx_start:idx_end]))
@@ -48,7 +60,7 @@ for nat in range(nat_start, nat_end+1, 4):
 
     print(nat, 'done')
 
-print('nat = ', list(range(nat_start, nat_end, 2)))
+print('nat = ', list(nat_range))
 print('rdf = ', rdf)
 print('udf = ', udf)
 
