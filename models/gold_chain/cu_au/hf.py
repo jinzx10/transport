@@ -62,10 +62,14 @@ for nat in range(4, 21):
     # auxbasis for density fitting
     ab = df.aug_etb(cell, beta=2.0)
 
+    kpts = cell.make_kpts([1,1,1], scaled_center=[0,0,0])    
+
     #================ unrestricted ================
-    mf = scf.UHF(cell).density_fit(auxbasis=ab)    
+    mf = scf.KUHF(cell).density_fit(auxbasis=ab)    
     mf.chkfile = savedir + '/uhf_' + str(nat).zfill(2) + '.chk'
     mf.with_df._cderi_to_save = savedir + '/cderi_' + str(nat).zfill(2) + '.h5'
+
+    mf.kpts = kpts
     
     # scf solver
     #mf = mf.newton()
@@ -75,7 +79,7 @@ for nat in range(4, 21):
 
     # initial guess
     ig = mf.get_init_guess()
-    ig[1,:,:] = 0
+    ig[1,:,:,:] = 0
 
     e = mf.kernel(dm0=ig)
 
@@ -85,9 +89,10 @@ for nat in range(4, 21):
 
     #================ restricted ================
     if nat % 2 == 1:
-        mf = scf.RHF(cell).density_fit(auxbasis=ab)    
+        mf = scf.KRHF(cell).density_fit(auxbasis=ab)    
         mf.chkfile = savedir + '/rhf_'+str(nat).zfill(2) + '.chk'
         mf.with_df._cderi = savedir + '/cderi_' + str(nat).zfill(2) + '.h5'
+        mf.kpts = kpts
         
         #mf = mf.newton()
         mf.max_cycle = 500

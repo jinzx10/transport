@@ -67,8 +67,11 @@ for nat in range(natmin, natmax+1, 2):
     # auxbasis for density fitting
     ab = df.aug_etb(cell, beta=df_beta)
 
+    kpts = cell.make_kpts([1,1,1], scaled_center=[0,0,0])    
+
     #================ unrestricted ================
-    mf = scf.UHF(cell).density_fit(auxbasis = ab)
+    mf = scf.KUHF(cell).density_fit(auxbasis = ab)
+    mf.kpts = kpts
 
     # data file
     mf.chkfile = savedir + '/uhf_' + str(nat).zfill(2) + '.chk'
@@ -82,7 +85,7 @@ for nat in range(natmin, natmax+1, 2):
 
     # initial guess
     ig = mf.get_init_guess()
-    ig[1,:,:] = 0
+    ig[1,:,:,:] = 0
 
     e = mf.kernel(dm0=ig)
 
@@ -93,7 +96,8 @@ for nat in range(natmin, natmax+1, 2):
     np.save(savedir + '/' + 'uFock_' + str(nat).zfill(2) + '.npy', fock)
 
     #================ restricted ================
-    mf = scf.RHF(cell).density_fit(auxbasis = ab)
+    mf = scf.KRHF(cell).density_fit(auxbasis = ab)
+    mf.kpts = kpts
 
     # data file
     mf.chkfile = savedir + '/rhf_' +str(nat).zfill(2) + '.chk'
