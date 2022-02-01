@@ -12,7 +12,7 @@
 source $HOME/.bashrc
 conda activate
 
-dir=$HOME/projects/transport/models/gold_chain/nat_conv
+dir=$HOME/projects/transport/models/cu_chain/nat_conv
 cd ${dir}
 
 timestamp=`date +%y%m%d-%H%M%S`
