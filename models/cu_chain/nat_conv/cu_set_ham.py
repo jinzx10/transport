@@ -6,8 +6,6 @@ from libdmet_solid.basis_transform import make_basis, eri_transform
 
 from pyscf.pbc import df, scf
 from pyscf.pbc.lib import chkfile
-from pyscf import lib
-from pyscf import gto
 
 # read cell from data
 datadir = 'data-' + sys.argv[1]
@@ -33,11 +31,6 @@ kmf.with_df._cderi = datadir + '/cderi_' + str(nat).zfill(2) + '.h5'
 kmf_data = chkfile.load(datadir + '/rhf_' + str(nat).zfill(2) + '.chk', 'scf')
 kmf.__dict__.update(kmf_data)
 
-
-####################
-
-
-
 # set spin
 mo_energy = np.asarray(kmf.mo_energy)
 mo_coeff = np.asarray(kmf.mo_coeff)
@@ -47,6 +40,13 @@ if len(mo_energy.shape) == 2:
     mo_coeff = mo_coeff[np.newaxis, ...]
 else:
     spin = 2
+
+
+
+####################
+
+
+
 
 # NOTE: choose IAO basis by user
 # C_ao_lo: transformation matrix from AO to LO (IAO) basis
