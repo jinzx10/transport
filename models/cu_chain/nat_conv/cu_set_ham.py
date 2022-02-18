@@ -42,23 +42,84 @@ else:
     spin = 2
 
 
+# constructing IAO
+use_reference = False
 
-####################
+if use_reference:
+
+    # following Tianyu's Kondo example, provide core & valence reference (pmol_core & pmol_val) manually
+
+    MINAO = {'Cu': 'def2-svp-bracket-minao'}
+    pmol = reference_mol(cell, minao=MINAO)
+    basis = pmol._basis
+    
+    # set valence IAO
+    minao_val = {'Cu':'def2-svp-bracket-minao-val'}
+    pmol_val = pmol.copy()
+    pmol_val.basis = minao_val
+    pmol_val.build()
+    basis_val = {}
+    basis_val["Cu"] = copy.deepcopy(pmol_val._basis["Cu"])
+
+    pmol_val = pmol.copy()
+    pmol_val.basis = basis_val
+    pmol_val.build()
+
+    val_labels = pmol_val.ao_labels()
+    for i in range(len(val_labels)):
+        val_labels[i] = val_labels[i].replace("Cu 1s", "Cu 4s")
+    pmol_val.ao_labels = lambda *args: val_labels
+
+    # set core IAO
+    minao_core = {'Cu':'def2-svp-bracket-minao-core'}
+    pmol_core = pmol.copy()
+    pmol_core.basis = minao_core
+    pmol_core.build()
+    basis_core = {}
+    basis_core["Cu"] = copy.deepcopy(pmol_core._basis["Cu"])
+    
+    pmol_core = pmol.copy()
+    pmol_core.basis = basis_core
+    pmol_core.build()
+
+    core_labels = pmol_core.ao_labels()
+    
+    ncore = len(pmol_core.ao_labels())
+    nval = pmol_val.nao_nr()
+    nvirt = cell.nao_nr() - ncore - nval
+    Lat.set_val_virt_core(nval, nvirt, ncore)
+    
+    # First construct IAO and PAO.
+    C_ao_iao, C_ao_iao_val, C_ao_iao_virt, C_ao_iao_core \
+            = make_basis.get_C_ao_lo_iao(Lat, kmf, minao=MINAO, full_return=True, \
+            pmol_val=pmol_val, pmol_core=pmol_core, tol=1e-9)
+
+    nlo = nao - ncore
+    C_ao_lo_full = np.zeros((spin,nkpts,nao,nlo),dtype=complex)
+    for s in range(spin):
+        C_ao_lo_full[s,:,:,:6] = C_ao_iao[:,:,ncore:(ncore+6)]
+        C_ao_lo_full[s,:,:,6:22] = C_ao_iao[:,:,(ncore+nval):(ncore+nval+16)]
+        C_ao_lo_full[s,:,:,22:(nval+16)] = C_ao_iao[:,:,(ncore+6):(ncore+nval)]
+        C_ao_lo_full[s,:,:,(nval+16):] = C_ao_iao[:,:,(ncore+nval+16):]
+    
+    nlo_co = 22
+    C_ao_lo = C_ao_lo_full[:,:,:,:nlo_co]
+
+else:
+
+    # call make_basis.get_C_ao_lo_iao without reference (like Tianyu's Hchain example)
+
+    MINAO = {'Cu': 'def2-svp-bracket-minao'}
+    C_ao_iao, C_ao_iao_val, C_ao_iao_virt = make_basis.get_C_ao_lo_iao(Lat, kmf, minao=MINAO, full_return=True)
+
+    C_ao_lo = np.zeros((spin,nkpts,nao,nao),dtype=complex)
+    for s in range(spin):
+        C_ao_lo[s] = C_ao_iao
 
 
-
-
-# NOTE: choose IAO basis by user
-# C_ao_lo: transformation matrix from AO to LO (IAO) basis
-MINAO = {'H':'gth-szv'}
-C_ao_iao, C_ao_iao_val, C_ao_iao_virt = make_basis.get_C_ao_lo_iao(Lat, kmf, minao=MINAO, full_return=True)
-C_ao_lo = np.zeros((spin,nkpts,nao,nao),dtype=np.complex128)
-for s in range(spin):
-    C_ao_lo[s] = C_ao_iao
-
-# C_mo_lo: transformation matrix from MO to LO (IAO) basis
 S_ao_ao = kmf.get_ovlp()
-C_mo_lo = np.zeros((spin,nkpts,nao,nao),dtype=np.complex128)
+
+C_mo_lo = np.zeros((spin,nkpts,nao,nlo))
 for s in range(spin):
     for ki in range(nkpts):
         C_mo_lo[s][ki] = np.dot(np.dot(mo_coeff[s][ki].T.conj(), S_ao_ao[ki]), C_ao_lo[s][ki])
@@ -67,6 +128,11 @@ feri = h5py.File(fn, 'w')
 feri['C_ao_lo'] = np.asarray(C_ao_lo)
 feri['C_mo_lo'] = np.asarray(C_mo_lo)
 feri.close()
+
+####################
+
+
+
 
 # get DFT density matrix in IAO basis
 DM_ao = np.asarray(kmf.make_rdm1())
