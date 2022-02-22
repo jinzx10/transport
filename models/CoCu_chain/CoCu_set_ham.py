@@ -10,6 +10,9 @@ from pyscf.pbc.lib import chkfile
 ############################################################
 #                   build cell
 ############################################################
+# total number of Cu atoms (left + right)
+nat = 9
+
 cell_fname = 'CoCu_' + str(nat).zfill(2) + '.chk'
 
 if os.path.isfile(cell_fname):
@@ -22,8 +25,7 @@ else:
     l = 2.7
     r = 2.7
     
-    # total number of Cu atoms (left + right)
-    nat = 9
+    # number of Cu atoms in the left/right lead
     nl = nat // 2
     nr = nat - nl
     
@@ -31,8 +33,9 @@ else:
     
     cell.unit = 'angstrom'
     cell.verbose = 4
-    cell.max_memory = 100000
+    cell.max_memory = 180000
     cell.dimension = 3
+    cell.ke_cutoff = 400
     cell.a = [[l+r+(nat-1)*a,0,0], [0,30,0], [0,0,30]]
     
     for iat in range(0, nl):
