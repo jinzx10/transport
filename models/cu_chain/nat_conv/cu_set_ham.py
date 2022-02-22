@@ -129,12 +129,7 @@ feri['C_ao_lo'] = np.asarray(C_ao_lo)
 feri['C_mo_lo'] = np.asarray(C_mo_lo)
 feri.close()
 
-####################
-
-
-
-
-# get DFT density matrix in IAO basis
+# get density matrix in IAO basis
 DM_ao = np.asarray(kmf.make_rdm1())
 if len(DM_ao.shape) == 3:
     DM_ao = DM_ao[np.newaxis, ...]
@@ -151,6 +146,14 @@ fn = 'DM_iao_k.h5'
 feri = h5py.File(fn, 'w')
 feri['DM'] = np.asarray(DM_lo)
 feri.close()
+
+
+
+####################
+
+
+
+
 
 # get 4-index ERI
 eri = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo, feri=gdf_fname)
@@ -197,3 +200,5 @@ fn = 'hcore_JK_iao_k_hf.h5'
 feri = h5py.File(fn, 'w')
 feri['JK'] = np.asarray(JK_lo)
 feri.close()
+
+

@@ -8,8 +8,8 @@ import sys
 datadir = 'data-' + sys.argv[1]
 plotdir = datadir + '/plot-' + sys.argv[2]
 
-nat_start = 5
-nat_end = 19
+nat_start = 7
+nat_end = 13
 nat_step = 2
 nat_range = range(nat_start, nat_end+1, nat_step)
 
@@ -28,7 +28,7 @@ for nat in nat_range:
     kmf_data = chkfile.load(datadir + '/rhf_' + str(nat).zfill(2) + '.chk', 'scf')
     kmf.__dict__.update(kmf_data)
 
-    MINAO ='def2-svp'
+    MINAO ='def2-svp-bracket-minao'
 
     # plot raw HF orbitals
     plot.plot_orb_k_all(cell, plotdir + '/raw_' + str(nat).zfill(2), kmf.mo_coeff, kpts, margin=0.0)

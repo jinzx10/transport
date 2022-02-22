@@ -12,13 +12,13 @@
 source $HOME/.bashrc
 conda activate
 
-dir=$HOME/projects/transport/models/gold_chain/cu_au
+dir=$HOME/projects/transport/models/cu_chain/cu_au
 cd ${dir}
 
 timestamp=`date +%y%m%d-%H%M%S`
 output="plot_${timestamp}.out"
 
-data_suffix="220124-205710"
+data_suffix="220215-021345"
 
 echo `date`
 
