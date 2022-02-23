@@ -11,7 +11,7 @@ from pyscf.pbc.lib import chkfile
 #                   build cell
 ############################################################
 # total number of Cu atoms (left + right)
-nat = 9
+nat = 7
 
 cell_fname = 'CoCu_' + str(nat).zfill(2) + '.chk'
 
@@ -36,7 +36,7 @@ else:
     cell.max_memory = 180000
     cell.dimension = 3
     cell.ke_cutoff = 400
-    cell.a = [[l+r+(nat-1)*a,0,0], [0,30,0], [0,0,30]]
+    cell.a = [[l+r+(nat-1)*a,0,0], [0,20,0], [0,0,20]]
     
     for iat in range(0, nl):
         cell.atom.append(['Cu', (iat*a, 0, 0)])
@@ -184,7 +184,7 @@ assert(np.max(np.abs(hcore_lo.sum(axis=1).imag/nkpts))<1e-6)
 assert(np.max(np.abs(JK_lo.sum(axis=1).imag/nkpts))<1e-6)
 
 # get HF JK term using DFT density
-kmf_hf = scf.KRHF(cell, kpts, exxdiv=ewald)
+kmf_hf = scf.KRHF(cell, kpts, exxdiv='ewald')
 kmf_hf.with_df = gdf
 kmf_hf.with_df._cderi = gdf_fname
 kmf_hf.max_cycle = 0
