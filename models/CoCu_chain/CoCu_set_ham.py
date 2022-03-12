@@ -337,8 +337,8 @@ if len(DM_ao.shape) == 3:
     DM_ao = DM_ao[np.newaxis, ...]
 
 DM_lo_all  = np.zeros((spin,nkpts,nao,nao),dtype=DM_ao.dtype)
-DM_lo_nc   = np.zeros((spin,nkpts,nao,nval+nvirt),dtype=DM_ao.dtype)
-DM_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co),dtype=DM_ao.dtype)
+DM_lo_nc   = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=DM_ao.dtype)
+DM_lo_ncCo = np.zeros((spin,nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=DM_ao.dtype)
 
 for s in range(spin):
     for ik in range(nkpts):
@@ -388,12 +388,12 @@ if len(JK_ao.shape) == 3:
     JK_ao = JK_ao[np.newaxis, ...]
 
 hcore_lo_all = np.zeros((spin,nkpts,nao,nao),dtype=complex)
-hcore_lo_nc = np.zeros((spin,nkpts,nao,nval+nvirt),dtype=complex)
-hcore_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co),dtype=complex)
+hcore_lo_nc = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=complex)
+hcore_lo_ncCo = np.zeros((spin,nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
 
 JK_lo_all = np.zeros((spin,nkpts,nao,nao),dtype=complex)
-JK_lo_nc = np.zeros((spin,nkpts,nao,nval+nvirt),dtype=complex)
-JK_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co),dtype=complex)
+JK_lo_nc = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=complex)
+JK_lo_ncCo = np.zeros((spin,nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
 
 for s in range(spin):
     for ik in range(nkpts):
@@ -429,8 +429,8 @@ if len(JK_ao.shape) == 3:
     JK_ao = JK_ao[np.newaxis, ...]
 
 JK_lo_all = np.zeros((spin,nkpts,nao,nao),dtype=complex)
-JK_lo_nc = np.zeros((spin,nkpts,nao,nval+nvirt),dtype=complex)
-JK_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co),dtype=complex)
+JK_lo_nc = np.zeros((spin,nkpts,nval_nvirt,nval+nvirt),dtype=complex)
+JK_lo_ncCo = np.zeros((spin,nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
 for s in range(spin):
     for ik in range(nkpts):
         JK_lo_all[s,ik] = np.dot(np.dot(C_ao_lo_all[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo_all[s,ik])
