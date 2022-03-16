@@ -38,6 +38,12 @@ nval_Cu = 6
 nvirt_Cu = 9
 
 ############################################################
+#               low-level mean-field method
+############################################################
+# if False, use HF instead
+use_pbe = True
+
+############################################################
 #                       build cell
 ############################################################
 # total number of Cu atoms (left + right)
@@ -113,9 +119,6 @@ else:
 ############################################################
 #           low-level mean-field calculation
 ############################################################
-# if False, use HF instead
-use_pbe = True
-
 # if False, the scf will use newton solver to help convergence
 use_smearing = False
 smearing_sigma = 0.05
@@ -211,7 +214,6 @@ if use_core_val:
     print('nval = ', nval)
     print('nvirt = ', nvirt)
     
-    # First construct IAO and PAO.
     C_ao_iao, C_ao_iao_val, C_ao_iao_virt, C_ao_iao_core \
             = make_basis.get_C_ao_lo_iao(Lat, kmf, minao=MINAO, full_return=True, \
             pmol_val=pmol_val, pmol_core=pmol_core, tol=1e-9)
@@ -225,76 +227,82 @@ else:
 #               rearrange orbitals
 ############################################################
 # rearrange IAO/PAO according to their positions
-# C_ao_lo: transformation matrix from AO to LO (IAO) basis
-# all : include core+val+virt for all atoms
-# nc  : include val+virt for all atoms
-# ncCo: include val+virt for Co atom only
-C_ao_lo_all  = np.zeros((spin,nkpts,nao,nao), dtype=complex)
-C_ao_lo_nc   = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=complex)
-C_ao_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co), dtype=complex)
 
-for s in range(spin):
-    # left lead
-    for iat in range(nl):
-        # core
-        C_ao_lo_all[s,:,:,iat*nao_Cu:iat*nao_Cu+ncore_Cu] \
-                = C_ao_iao[:,:,iat*ncore_Cu:(iat+1)*ncore_Cu]
-
-        # val
-        C_ao_lo_all[s,:,:,iat*nao_Cu+ncore_Cu:iat*nao_Cu+ncore_Cu+nval_Cu] \
-                = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
-        C_ao_lo_nc[s,:,:,iat*(nval_Cu+nvirt_Cu):iat*(nval_Cu+nvirt_Cu)+nval_Cu] \
-                = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
-
-        # virt
-        C_ao_lo_all[s,:,:,iat*nao_Cu+ncore_Cu+nval_Cu:(iat+1)*nao_Cu] \
-                = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
-        C_ao_lo_nc[s,:,:,iat*(nval_Cu+nvirt_Cu)+nval_Cu:(iat+1)*(nval_Cu+nvirt_Cu)] \
-                = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
-
-    # Co
-    # core
-    C_ao_lo_all[s,:,:,nl*nao_Cu:nl*nao_Cu+ncore_Co] \
-            = C_ao_iao[:,:,nl*ncore_Cu:nl*ncore_Cu+ncore_Co]
-
-    # val
-    C_ao_lo_all[s,:,:,nl*nao_Cu+ncore_Co:nl*nao_Cu+ncore_Co+nval_Co] \
-            = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
-    C_ao_lo_nc[s,:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co] \
-            = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
-
-    # virt
-    C_ao_lo_all[s,:,:,nl*nao_Cu+ncore_Co+nval_Co:nl*nao_Cu+nao_Co] \
-            = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
-    C_ao_lo_nc[s,:,:,nl*(nval_Cu+nvirt_Cu)+nval_Co:nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
-            = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+if use_core_val:
+    # C_ao_lo: transformation matrix from AO to LO (IAO) basis
+    # all : include core+val+virt for all atoms
+    # nc  : include val+virt for all atoms
+    # ncCo: include val+virt for Co atom only
+    C_ao_lo_all  = np.zeros((spin,nkpts,nao,nao), dtype=complex)
+    C_ao_lo_nc   = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=complex)
+    C_ao_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co), dtype=complex)
     
-
-    # right lead
-    for iat in range(nr):
+    for s in range(spin):
+        # left lead
+        for iat in range(nl):
+            # core
+            C_ao_lo_all[s,:,:,iat*nao_Cu:iat*nao_Cu+ncore_Cu] \
+                    = C_ao_iao[:,:,iat*ncore_Cu:(iat+1)*ncore_Cu]
+    
+            # val
+            C_ao_lo_all[s,:,:,iat*nao_Cu+ncore_Cu:iat*nao_Cu+ncore_Cu+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
+            C_ao_lo_nc[s,:,:,iat*(nval_Cu+nvirt_Cu):iat*(nval_Cu+nvirt_Cu)+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
+    
+            # virt
+            C_ao_lo_all[s,:,:,iat*nao_Cu+ncore_Cu+nval_Cu:(iat+1)*nao_Cu] \
+                    = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
+            C_ao_lo_nc[s,:,:,iat*(nval_Cu+nvirt_Cu)+nval_Cu:(iat+1)*(nval_Cu+nvirt_Cu)] \
+                    = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
+    
+        # Co
         # core
-        C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu] \
-                = C_ao_iao[:,:,nl*ncore_Cu+ncore_Co+iat*ncore_Cu:nl*ncore_Cu+ncore_Co+(iat+1)*ncore_Cu]
-
+        C_ao_lo_all[s,:,:,nl*nao_Cu:nl*nao_Cu+ncore_Co] \
+                = C_ao_iao[:,:,nl*ncore_Cu:nl*ncore_Cu+ncore_Co]
+    
         # val
-        C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu] \
-                = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
-        C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co:(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu] \
-                = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
-
+        C_ao_lo_all[s,:,:,nl*nao_Cu+ncore_Co:nl*nao_Cu+ncore_Co+nval_Co] \
+                = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
+        C_ao_lo_nc[s,:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co] \
+                = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
+    
         # virt
-        C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu:nl*nao_Cu+nao_Co+(iat+1)*nao_Cu] \
-                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
-        C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu:(nl+iat+1)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
-                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
+        C_ao_lo_all[s,:,:,nl*nao_Cu+ncore_Co+nval_Co:nl*nao_Cu+nao_Co] \
+                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+        C_ao_lo_nc[s,:,:,nl*(nval_Cu+nvirt_Cu)+nval_Co:nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
+                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+        
+    
+        # right lead
+        for iat in range(nr):
+            # core
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu] \
+                    = C_ao_iao[:,:,nl*ncore_Cu+ncore_Co+iat*ncore_Cu:nl*ncore_Cu+ncore_Co+(iat+1)*ncore_Cu]
+    
+            # val
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
+            C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co:(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
+    
+            # virt
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu:nl*nao_Cu+nao_Co+(iat+1)*nao_Cu] \
+                    = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
+            C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu:(nl+iat+1)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
+                    = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
+    
+    C_ao_lo_ncCo = C_ao_lo_nc[:,:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co]
 
-C_ao_lo_ncCo = C_ao_lo_nc[:,:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co]
+else:
+    # TBD...
+    print('rearranging orbitals not implemented!')
 
 
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = False 
+plot_orb = True
 
 if plot_orb:
     plotdir = datadir + '/plot_' + label
@@ -362,7 +370,7 @@ for s in range(spin):
     nelec_lo_ncCo = np.trace(DM_lo_ncCo[s].sum(axis=0)/nkpts)
     print ('Nelec ncCo', nelec_lo_ncCo.real)
 
-fn = 'DM_lo_' + label + '.h5'
+fn = datadir + '/DM_lo_' + label + '.h5'
 f = h5py.File(fn, 'w')
 f['DM_lo_all'] = np.asarray(DM_lo_all)
 f['DM_lo_nc'] = np.asarray(DM_lo_nc)
@@ -374,7 +382,7 @@ eri_lo_all = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo_all, fer
 eri_lo_nc = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo_nc, feri=gdf_fname)
 eri_lo_ncCo = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo_ncCo, feri=gdf_fname)
 
-fn = 'eri_lo_' + label + '.h5'
+fn = datadir + '/eri_lo_' + label + '.h5'
 f = h5py.File(fn, 'w')
 f['eri_lo_all'] = np.asarray(eri_lo_all.real)
 f['eri_lo_nc'] = np.asarray(eri_lo_nc.real)
@@ -406,7 +414,7 @@ for s in range(spin):
         JK_lo_ncCo[s,ik] = np.dot(np.dot(C_ao_lo_ncCo[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo_ncCo[s,ik])
 
 
-fn = 'hcore_JK_lo_dft_' + label + '.h5'
+fn = datadir + '/hcore_JK_lo_dft_' + label + '.h5'
 f = h5py.File(fn, 'w')
 f['hcore_lo_all'] = np.asarray(hcore_lo_all)
 f['hcore_lo_nc'] = np.asarray(hcore_lo_nc)
@@ -429,7 +437,7 @@ if len(JK_ao.shape) == 3:
     JK_ao = JK_ao[np.newaxis, ...]
 
 JK_lo_all = np.zeros((spin,nkpts,nao,nao),dtype=complex)
-JK_lo_nc = np.zeros((spin,nkpts,nval_nvirt,nval+nvirt),dtype=complex)
+JK_lo_nc = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=complex)
 JK_lo_ncCo = np.zeros((spin,nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
 for s in range(spin):
     for ik in range(nkpts):
@@ -438,7 +446,7 @@ for s in range(spin):
         JK_lo_ncCo[s,ik] = np.dot(np.dot(C_ao_lo_ncCo[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo_ncCo[s,ik])
 
 # HF only differs from DFT by the JK part
-fn = 'JK_lo_hf_' + label + '.h5'
+fn = datadir + '/JK_lo_hf_' + label + '.h5'
 f = h5py.File(fn, 'w')
 f['JK_lo_all'] = np.asarray(JK_lo_all)
 f['JK_lo_nc'] = np.asarray(JK_lo_nc)
