@@ -21,7 +21,10 @@ parser.add_argument('--datadir', default = 'data', type = str)
 
 args = parser.parse_args()
 
-datadir = args.datadir + '/'
+if args.datadir is None:
+    datadir = 'Cu_mf_data/'
+else:
+    datadir = args.datadir + '/'
 
 print('data directory:', datadir)
 
@@ -30,10 +33,10 @@ print('data directory:', datadir)
 #                       basis
 ############################################################
 Cu_basis = 'def2-svp-bracket'
-nao_Cu = 24
 ncore_Cu = 9
 nval_Cu = 6
 nvirt_Cu = 9
+nao_Cu = ncore_Cu + nval_Cu + nvirt_Cu
 
 
 ############################################################
@@ -132,6 +135,9 @@ else:
     kmf.chkfile = mf_fname
     kmf.kernel()
 
+print(kmf.mo_energy)
+print(np.asarray(kmf.mo_energy)[0,29*8-1])
+exit()
 
 ############################################################
 #           Orbital Localization

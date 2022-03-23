@@ -18,7 +18,10 @@ parser.add_argument('--datadir', default = 'data', type = str)
 
 args = parser.parse_args()
 
-datadir = args.datadir + '/'
+if args.datadir is None:
+    datadir = 'CoCu_set_ham_data/'
+else:
+    datadir = args.datadir + '/'
 
 print('data directory:', datadir)
 
@@ -26,16 +29,16 @@ print('data directory:', datadir)
 #                       basis
 ############################################################
 Co_basis = 'def2-svp'
-nao_Co = 31
 ncore_Co = 9
 nval_Co = 6
 nvirt_Co = 16
+nao_Co = ncore_Co + nval_Co + nvirt_Co
 
 Cu_basis = 'def2-svp-bracket'
-nao_Cu = 24
 ncore_Cu = 9
 nval_Cu = 6
 nvirt_Cu = 9
+nao_Cu = ncore_Cu + nval_Cu + nvirt_Cu
 
 ############################################################
 #               low-level mean-field method
@@ -122,7 +125,6 @@ else:
 # if False, the scf will use newton solver to help convergence
 use_smearing = False
 smearing_sigma = 0.05
-
 
 if use_pbe:
     kmf = scf.KRKS(cell, kpts).density_fit()
@@ -238,6 +240,8 @@ if use_core_val:
     C_ao_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co), dtype=complex)
     
     for s in range(spin):
+        '''
+        rearrange orbitals strictly according to atomic index (Co is in the middle)
         # left lead
         for iat in range(nl):
             # core
@@ -293,6 +297,9 @@ if use_core_val:
                     = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
     
     C_ao_lo_ncCo = C_ao_lo_nc[:,:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co]
+    '''
+
+    # rearrange orbitals so that Co comes first
 
 else:
     # TBD...
