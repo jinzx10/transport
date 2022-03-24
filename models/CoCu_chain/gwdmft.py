@@ -217,7 +217,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         V_L = np.zeros((nao_full,sz_blk), dtype=complex)
         V_R = np.zeros((nao_full,sz_blk), dtype=complex)
 
-        V_L[:sz_blk,:] = H01.T.conj()
+        V_L[22:22+sz_blk,:] = H01.T.conj()
         V_R[-sz_blk:,:] = H01
 
         Sigma_L = V_L @ g00 @ V_L.T.conj()
@@ -229,7 +229,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         # the contact contains 9 Cu atoms (4 left, 5 right) and a Co atom
         # each Cu atom has 6 val + 9 virt orbitals
         # the Co atom has 6 val + 16 virt orbitals
-        G_imp = G_C[60:82,60:82]
+        G_imp = G_C[:22,:22]
 
         #print('G_C.shape = ', G_C.shape)
         #print('G_imp.shape = ', G_imp.shape)

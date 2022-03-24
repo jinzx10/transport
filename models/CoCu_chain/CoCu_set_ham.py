@@ -239,9 +239,9 @@ if use_core_val:
     C_ao_lo_nc   = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=complex)
     C_ao_lo_ncCo = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co), dtype=complex)
     
+    '''
+    rearrange orbitals strictly according to atomic index (Co is in the middle)
     for s in range(spin):
-        '''
-        rearrange orbitals strictly according to atomic index (Co is in the middle)
         # left lead
         for iat in range(nl):
             # core
@@ -300,6 +300,63 @@ if use_core_val:
     '''
 
     # rearrange orbitals so that Co comes first
+    for s in range(spin):
+        # Co
+        # core
+        C_ao_lo_all[s,:,:,:ncore_Co] \
+                = C_ao_iao[:,:,nl*ncore_Cu:nl*ncore_Cu+ncore_Co]
+    
+        # val
+        C_ao_lo_all[s,:,:,ncore_Co:ncore_Co+nval_Co] \
+                = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
+        C_ao_lo_nc[s,:,:,:nval_Co] \
+                = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
+    
+        # virt
+        C_ao_lo_all[s,:,:,ncore_Co+nval_Co:nao_Co] \
+                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+        C_ao_lo_nc[s,:,:,nval_Co:nval_Co+nvirt_Co] \
+                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+        
+
+        # left lead
+        for iat in range(nl):
+            # core
+            C_ao_lo_all[s,:,:,nao_Co+iat*nao_Cu:nao_Co+iat*nao_Cu+ncore_Cu] \
+                    = C_ao_iao[:,:,iat*ncore_Cu:(iat+1)*ncore_Cu]
+    
+            # val
+            C_ao_lo_all[s,:,:,nao_Co+iat*nao_Cu+ncore_Cu:nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
+            C_ao_lo_nc[s,:,:,nval_Co+nvirt_Co+iat*(nval_Cu+nvirt_Cu):nval_Co+nvirt_Co+iat*(nval_Cu+nvirt_Cu)+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
+    
+            # virt
+            C_ao_lo_all[s,:,:,nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu:nao_Co+(iat+1)*nao_Cu] \
+                    = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
+            C_ao_lo_nc[s,:,:,nval_Co+nvirt_Co+iat*(nval_Cu+nvirt_Cu)+nval_Cu:nval_Co+nvirt_Co+(iat+1)*(nval_Cu+nvirt_Cu)] \
+                    = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
+    
+    
+        # right lead
+        for iat in range(nr):
+            # core
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu] \
+                    = C_ao_iao[:,:,nl*ncore_Cu+ncore_Co+iat*ncore_Cu:nl*ncore_Cu+ncore_Co+(iat+1)*ncore_Cu]
+    
+            # val
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu:nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
+            C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co:(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu] \
+                    = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
+    
+            # virt
+            C_ao_lo_all[s,:,:,nl*nao_Cu+nao_Co+iat*nao_Cu+ncore_Cu+nval_Cu:nl*nao_Cu+nao_Co+(iat+1)*nao_Cu] \
+                    = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
+            C_ao_lo_nc[s,:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu:(nl+iat+1)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
+                    = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu+nvirt_Co+iat*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co+(iat+1)*nvirt_Cu]
+    
+    C_ao_lo_ncCo = C_ao_lo_nc[:,:,:,:nval_Co+nvirt_Co]
 
 else:
     # TBD...

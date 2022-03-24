@@ -161,7 +161,7 @@ def dmft_abinitio():
 
     ### Finishing parameter settings ###
 
-    datadir = 'Co_svp_Cu_svp_bracket_pbe/'
+    datadir = 'Co_svp_Cu_svp_bracket_pbe2/'
     label = 'CoCu_09_111'
 
     # read imp hcore and DFT veff
