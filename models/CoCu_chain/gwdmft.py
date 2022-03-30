@@ -187,8 +187,13 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     hcore_cell_band = 1./nkpts_hyb * np.sum(hcore_k_band, axis=1)
     JK_dft_cell_band = 1./nkpts_hyb * np.sum(JK_dft_k_band, axis=1)
 
+    # ZJ:
     # get_gf(h, Sigma, E, delta) returns inv( (E+i*delta)*eye - h - Sigma )
     # get_sigma(G0, G) returns inv(G0) - inv(G)
+    # nao = 22 is the number of Co orbitals (only val+virt)
+    # nao_full =  is the total number of 1 Co + 9 Cu orbitals (only val+virt)
+    # nval = 6 is the number of Co valence orbitals
+    # hyb should be the size of spin x nval x nval x nw
 
     # gf0_cell: local GF; gf_cell: lattice GF (from supercell calc)
     _, _, nao_full, nao_full = JK_full.shape
@@ -201,8 +206,9 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     # ZJ: change the hyb below
     #hyb = get_sigma(gf0_cell, gf_cell[:,ncore:nval,ncore:nval])
     #<===================================================
-    hyb = np.zeros((spin,nao,nao,nw), dtype=np.complex)
+    hyb = np.zeros((spin,nval,nval,nw), dtype=np.complex)
     print('nao_full = ', nao_full)
+    print('nao = ', nao)
     print('nw = ', nw)
     print('H00.shape = ', H00.shape)
     print('H01.shape = ', H01.shape)
@@ -223,19 +229,15 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         Sigma_L = V_L @ g00 @ V_L.T.conj()
         Sigma_R = V_R @ g00 @ V_R.T.conj()
 
+        # contact block of the full Green's function
         G_C = np.linalg.inv(z*np.eye(nao_full)-hcore_full[0,0]-JK_dft_full[0,0]-Sigma_L-Sigma_R)
 
-        # extract the impurity block
-        # the contact contains 9 Cu atoms (4 left, 5 right) and a Co atom
-        # each Cu atom has 6 val + 9 virt orbitals
-        # the Co atom has 6 val + 16 virt orbitals
-        G_imp = G_C[:22,:22]
+        # impurity block
+        # here the impurity merely contains the 6 Co valence orbitals
+        G_imp = G_C[:nval,:nval]
 
-        #print('G_C.shape = ', G_C.shape)
-        #print('G_imp.shape = ', G_imp.shape)
-
-        # G_imp is inv(z-H_imp-Sigma_imp)
-        hyb[0,:,:,iw] = (freqs[iw] + 1j*delta)*np.eye(22) - himp_cell[0] - np.linalg.inv(G_imp)
+        # G_imp = inv(z-h_imp-hyb)
+        hyb[0,:,:,iw] = (freqs[iw] + 1j*delta)*np.eye(nval) - himp_cell[0,:nval,nval] - np.linalg.inv(G_imp)
     
 
     #===================================================>
@@ -297,6 +299,9 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         print('freqs.shape', freqs.shape)
         print('hyb.shape', hyb.shape)
 
+        # ZJ: himp has the same size as himp_cell (val+virt orbitals for Co)
+        # but only ncore:nval orbitals are coupled to the bath
+
         # construct embedding Hamiltonian
         himp, eri_imp = imp_ham(himp_cell, eris, bath_v, bath_e, ncore)
 
@@ -309,16 +314,19 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             dm0[:,:nao,:nao] = dm_last[:,:nao,:nao].copy()
 
         # optimize chemical potential for correct number of impurity electrons
+        print('occupancy = ', occupancy)
         if opt_mu:
             mu = mu_fit(dmft, mu, occupancy, himp, eri_imp, dm0)
             comm.Barrier()
             mu = comm.bcast(mu, root=0)
             comm.Barrier()
+        print('optimized mu = ', mu)
 
         # run HF for embedding problem
-        #dmft._scf = mf_kernel(himp, eri_imp, mu, nao, dm0,
-        #                      max_mem=dmft.max_memory, verbose=dmft.verbose)
+        dmft._scf = mf_kernel(himp, eri_imp, mu, nao, dm0,
+                              max_mem=dmft.max_memory, verbose=dmft.verbose)
 
+        '''
         # Get mean-field determinant by diagonalizing imp+bath Ham just once
         dm_init = np.zeros_like(dm0)
         dm_init[:,:nao,:nao] = DM_cell[:,:nao,:nao]
@@ -400,13 +408,17 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         mf.JK_hf = JK_hf[0]
         mf.dm_init = dm_init[0]
         mf.nimp = nao
+        '''
 
+        print('dmft.max_cycle = ', dmft.max_cycle)
         if dmft.max_cycle <= 1:
             break
         dm_last = dmft._scf.make_rdm1()
         if len(dm_last.shape) == 2:
             dm_last = dm_last[np.newaxis, ...]
 
+        # ZJ: note the if branch below is based on the broadening delta! 
+        # the comment below explains why
         '''
         Run impurity solver calculation to get self-energy.
         When delta is small, CCSD imp self-energy can be non-causal if computed directly
@@ -417,7 +429,12 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         if delta >= 0.05:
             # imp GF -> imp sigma
             gf_imp = np.zeros((spin,nao,nao,nw),dtype=np.complex128)
+
+            # ZJ: the line below contains the core impurity solver
+            print('ready to solve the impurity problem')
             gf_imp[:,nfrz:,nfrz:,:] = dmft.get_gf_imp(freqs, delta)
+            print('impurity problem solved!')
+
             if dmft.solver_type == 'cc' or dmft.solver_type == 'ucc':
                 gf_imp = 0.5 * (gf_imp+gf_imp.transpose(0,2,1,3))
             # Treat frozen core in solver (core GF appoximated by HF)
@@ -431,6 +448,8 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             sigma_imp = get_sigma(gf0_imp, gf_imp)
         else:
             # imp+bath GF -> imp+bath sigma -> imp sigma
+            print('ready to solve the impurity problem')
+            # ZJ: the line below contains the core impurity solver
             sigma_imp = dmft.get_sigma_imp(freqs, delta)
             sigma_imp = sigma_imp[:,:nao,:nao]
 
@@ -813,8 +832,8 @@ def imp_ham(hcore_cell, eri_cell, bath_v, bath_e, ncore):
     for s in range(spin):
         himp[s,nao:,nao:] = np.diag(bath_e[s])
 
-    print('nao = ', nao)
-    print('nbath = ', nbath)
+    print('imp_ham: nao = ', nao)
+    print('imp_ham: nbath = ', nbath)
     eri_imp = np.zeros([spin*(spin+1)//2, nao+nbath, nao+nbath, nao+nbath, nao+nbath])
     eri_imp[:,:nao,:nao,:nao,:nao] = eri_cell
     return himp, eri_imp
@@ -1194,8 +1213,10 @@ class DMFT(lib.StreamObject):
 
         self.dump_flags()
 
+        print('self kernel ready!')
         self.converged, self.mu = kernel(self, mu0, wl=wl, wh=wh, occupancy=occupancy, delta=delta,
                                          conv_tol=conv_tol, opt_mu=opt_mu, dump_chk=dump_chk, H00=H00, H01=H01)
+        print('self kernel done!')
 
         if rank == 0:
             self._finalize()
@@ -1220,6 +1241,7 @@ class DMFT(lib.StreamObject):
 
     def get_rdm_imp(self):
         '''Calculate the interacting local RDM from the impurity problem'''
+        print('ready to compute imp rdm!')
         if self.solver_type == 'cc':
             assert(self.nfrz == 0)
             return cc_rdm(self._scf, ao_orbs=range(self.nao), cas=self.cas, casno=self.casno,
@@ -1306,6 +1328,7 @@ class DMFT(lib.StreamObject):
 
         if self.solver_type == 'cc':
             assert(self.nfrz == 0)
+            print('start cc_gf')
             gf = cc_gf(self._scf, freqs, delta, ao_orbs=range(nmo), gmres_tol=self.gmres_tol,
                        nimp=self.nao, cas=self.cas, casno=self.casno, composite=self.composite,
                        thresh=self.thresh, nvir_act=self.nvir_act, nocc_act=self.nocc_act,

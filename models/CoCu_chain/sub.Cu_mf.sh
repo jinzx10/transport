@@ -2,23 +2,24 @@
 
 #SBATCH --output=slurm.out
 #SBATCH --partition=serial,parallel,smallmem
+##SBATCH --partition=smallmem
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=28
 #SBATCH --mem=100G
-#SBATCH --job-name=CoCu_set_ham
+#SBATCH --job-name=Cu_mf
 
 source $HOME/.bashrc
 conda activate
 
 dir=$HOME/projects/transport/models/CoCu_chain
-datadir=${dir}/Co_svp_Cu_svp_bracket_pbe2
+datadir=${dir}/Cu_svp_bracket_pbe
 
 cd ${dir}
 mkdir -p ${datadir}
 
 timestamp=`date +%y%m%d-%H%M%S`
-output="CoCu_set_ham_${timestamp}.out"
+output="Cu_mf_${timestamp}.out"
 
-python ${dir}/CoCu_set_ham.py --datadir=${datadir} > ${datadir}/${output}
+python ${dir}/Cu_mf.py --datadir=${datadir} > ${datadir}/${output}

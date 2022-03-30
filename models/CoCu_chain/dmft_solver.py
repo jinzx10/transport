@@ -9,7 +9,7 @@ from fcdmft.solver import scf_mu as scf
 from mpi4py import MPI
 
 einsum = lib.einsum
-lib.param.TMPDIR = "/scratch/global/tyzhu/tmp/"
+lib.param.TMPDIR = "/scratch/global/zuxin/tmp/"
 
 rank = MPI.COMM_WORLD.Get_rank()
 size = MPI.COMM_WORLD.Get_size()
@@ -482,7 +482,9 @@ def cc_gf(mf, freqs, delta, ao_orbs=None, gmres_tol=1e-4, nimp=None,
         mf.nocc_act = mf_cas.mol.nelectron // 2
         mf.nvir_act = len(mf_cas.mo_energy) - mf.nocc_act
     else:
+        print('start RCCSD')
         mycc = cc.RCCSD(mf)
+    print('finish RCCSD')
     mycc.conv_tol = 1e-8
     mycc.conv_tol_normt = 1e-5
     mycc.diis_space = 15

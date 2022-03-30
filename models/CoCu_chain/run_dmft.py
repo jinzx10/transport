@@ -51,31 +51,48 @@ def dmft_abinitio():
     '''
     # DMFT self-consistent loop parameters
     gw_dmft = False
+
+    # ZJ: when this option is turned on, mu is optimized during EACH DMFT cycle,
+    # and for every optimization, get_rdm_imp is called multiple times until convergence.
     opt_mu = False
-    #solver_type = 'dmrg'
+
+    # ZJ: for Kondo problems, 'log' (or a hybrid scheme that contains 
+    # log discretization near the Fermi level) might be necessary
     #disc_type = 'nonlin2'
-    solver_type = 'cc'
     disc_type = 'log'
-    max_memory = 120000
+
+    solver_type = 'cc'
     dmft_max_cycle = 0
+    max_memory = 120000
     chkfile = 'DMFT_chk.h5'
     diag_only = False
+
+    # ZJ: the two options below relate to the 'opt' bath discretization
+    # see opt_bath & opt_bath_v_only in gwdmft.py
     orb_fit = range(1,6)
     opt_init_method = 'log'
 
-    delta = 0.01
+    # ZJ: small imaginary number in the retarded Green's function (inv(z-H), z=E+i*delta)
+    # delta = 0.05 is a threshold, see gwdmft.py
+    delta = 0.03
+
     #mu = 0.623759012177
+    #mu = -0.1613936097992017 # Cu chain's HOMO
+    mu = -0.10
+
     #nbath = 49
-    mu = -0.1613936097992017 # Cu chain's HOMO
     nbath = 10
+
     nb_per_e = 6
     wl0 = -0.3
     wh0 = 0.3
 
-    nval = 6
     ncore = 0
+    nval = 6
     nfrz = 0
-    nelectron = 7.2494509284467625
+
+    #nelectron = 7.2494509284467625
+    nelectron = 9
 
     # Kondo specific parameters
     mf_type = 'dft'
@@ -117,7 +134,8 @@ def dmft_abinitio():
         vno_only : bool
             Only construct virtual natural orbitals. Default is True.
     '''
-    cas = True
+    cas = False
+    #cas = True
     casno = 'ci'
     composite = False
     thresh = 5e-3
@@ -233,6 +251,7 @@ def dmft_abinitio():
     del eri
 
     #<=======================================================
+    # ZJ: get H00 and H01 blocks for computing the surface Green's function
     # read bath Hamiltonian
     bathdir = 'Cu_svp_bracket_pbe/'
     label = 'Cu_16_111'
@@ -319,7 +338,9 @@ def dmft_abinitio():
     mydmft.save_mf = save_mf
 
     #mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu)
+    print('mydmft kernel ready!')
     mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu, H00=H00, H01=H01)
+    print('mydmft kernel done!')
     occupancy = 0.
     occupancy = np.trace(mydmft.get_rdm_imp())
     if rank == 0:
@@ -328,6 +349,8 @@ def dmft_abinitio():
     mydmft.verbose = 5
     mydmft._scf.mol.verbose = 5
     spin = mydmft.spin
+
+    print('run_imagreq = ', run_imagfreq)
 
     if not run_imagfreq:
         if extra_delta is not None:
@@ -349,9 +372,12 @@ def dmft_abinitio():
             extra_freqs = None
             extra_delta = None
 
+        print('ready to compute impurity DoS')
         # Get impurity DOS (production run)
         ldos_t2g, ldos_eg, sigma = mydmft.get_ldos_imp(freqs, eta, extra_freqs=extra_freqs,
                                                        extra_delta=extra_delta, use_gw=use_gw)
+        print('Impurity DoS computed!')
+
         if extra_delta is not None:
             freqs = np.array(extra_freqs).reshape(-1)
             eta = extra_delta

@@ -149,6 +149,24 @@ else:
     kmf.max_cycle = 200
     kmf.kernel()
 
+'''
+#<=========================================================
+mo_occ = kmf.mo_occ[0]
+mo_energy = kmf.mo_energy[0]
+print('mo_energy = ', mo_energy)
+print('mo_occ = ', mo_occ)
+
+idx = np.argsort(mo_energy)
+mo_energy = mo_energy[idx]
+mo_occ = mo_occ[idx]
+print('mo_energy = ', mo_energy)
+print('mo_occ = ', mo_occ)
+print(np.sum(mo_occ))
+print(mo_energy[144]-mo_energy[143])
+exit()
+#=========================================================>
+'''
+
 
 # set spin: unrestricted -> 2; restricted -> 1
 # and make sure they have the same dimension
