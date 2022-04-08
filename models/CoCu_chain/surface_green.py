@@ -24,11 +24,13 @@ S = [   [S00, S01, 0  , ..., ..., ..., ..., ...],
         [..., ..., ..., ...,  0 , S10, S00, S01],
         [..., ..., ..., ...,  0 ,  0 , S10, S00] ]
 
-the total Green's function G(z) is given by
+The total Green's function G(z) is defined by
 
 (zS-H) G(z) = I
 
-This script contains functions that compute G00, the upper-left corner block of G.
+and the upper-left corner block of G(z) is called the surface Green's function.
+
+This script contains several functions that compute the surface Green's function
 
 '''
 
@@ -48,7 +50,7 @@ def LopezSancho1984(z, H00, H01, S00 = None, S01 = None, max_iter = 50, conv_thr
     if S01 is None:
         S01 = np.zeros((sz,sz))
 
-    # tt stands for \tilde{t}
+    # tt stands for \tilde{t} (see reference)
     t  = -np.linalg.solve(z*S00-H00, z*S01.T.conj()-H01.T.conj())
     tt = -np.linalg.solve(z*S00-H00, z*S01-H01)
 
