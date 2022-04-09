@@ -33,34 +33,35 @@ def direct_disc_hyb(hyb, grid, nint=1, nbath_per_ene=None, eig_tol=1e-8):
     '''
 
     ngrid = len(grid)
-    nimp = hyb.shape[1]
-    if nbath_per_ene is None:
-        nbath_per_ene = nimp
-
     # make sure grid is sorted
     idx_sort = np.argsort(grid)
     grid = grid[idx_sort]
 
     if callable(hyb):
         ne = ngrid - 1
+        nimp = hyb(0).shape[0]
     else:
+        nimp = hyb.shape[1]
         ne = (ngrid-1) // nint
         hyb = hyb[idx_sort]
+
+    if nbath_per_ene is None:
+        nbath_per_ene = nimp
 
     e = np.zeros(ne)
     v = np.zeros((ne, nimp, nbath_per_ene))
 
     for ie in range(ne):
 
-        # calculate \int hyb(x) dx and \int x*Tr{hyb(x)}dx for each interval
+        # \int hyb(x) dx and \int x*Tr{hyb(x)}dx for each interval
         xTrhybint = 0
         hybint = np.zeros((nimp, nimp))
 
         if callable(hyb):
             # generate a grid for integration between grid[ie] and grid[ie+1]
             intgrid = np.linspace(grid[ie], grid[ie+1], nint+1)
-            intgrid = (intgrid[1:]+intgrid[:-1])/2
             dx = intgrid[1]-intgrid[0]
+            intgrid = (intgrid[1:]+intgrid[:-1])/2
 
             for ii in range(nint):
                 hyb_i = hyb(intgrid[ii])
@@ -75,13 +76,15 @@ def direct_disc_hyb(hyb, grid, nint=1, nbath_per_ene=None, eig_tol=1e-8):
                 hybint += (hyb[i0+ii] + hyb[i0+ii+1]) / 2 * dx
                 xTrhybint += (grid[i0+ii]*hyb[i0+ii].trace() + grid[i0+ii+1]*hyb[i0+ii+1].trace()) / 2 * dx
 
+        # compute the bath energy and couplings from the integrals
         e[ie] = xTrhybint / hybint.trace()
         val, vec = np.linalg.eigh(hybint)
 
         idx_negval = np.where(val < 0)
         bignegval = val[idx_negval][val[idx_negval] < -eig_tol]
         if len(bignegval) != 0:
-            print('warning: direct_disc_bath: big negative eigenvalues:', bignegval)
+            print('warning: significantly negative eigenvalue(s) found \
+                    for the integration of hybridization function:', bignegval)
         val[idx_negval] = 0
 
         v[ie,:,:] = vec[:,-nbath_per_ene:] * np.sqrt(val[-nbath_per_ene:])
