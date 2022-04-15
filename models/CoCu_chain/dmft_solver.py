@@ -27,7 +27,7 @@ except:
 Impurity solver interfaces for DMFT calculation
 '''
 
-def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE):
+def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE, JK00=None):
     '''
     HF calculation with fixed chemical potential and fluctuating occupancy
 
@@ -58,7 +58,7 @@ def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE):
         mf.get_ovlp = lambda *args: np.eye(n)
         mf._eri = ao2mo.restore(8, eri_imp[0], n)
 
-        mf.smearing = 0.05
+        #mf.smearing = 0.05
         if rank == 0:
             mf.kernel(dm0[0])
         else:
@@ -125,6 +125,15 @@ def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE):
     mf.mo_coeff = mo_coeff
     mf.mo_energy = mo_energy
     mf.mo_occ = mo_occ
+    #<========================================
+    #mf.nimp = nao
+    #mf.dm_init = mf.make_rdm1()
+    #JK_impbath = scf._get_veff(mf.dm_init, eri_imp)
+    #mf.JK = JK_impbath[0]
+    #JK_hf = JK_impbath.copy()
+    #JK_hf[:,:nao,:nao] = JK00[:,:nao,:nao]
+    #mf.JK_hf = JK_hf[0]
+    #========================================>
     comm.Barrier()
 
     return mf
@@ -482,9 +491,10 @@ def cc_gf(mf, freqs, delta, ao_orbs=None, gmres_tol=1e-4, nimp=None,
         mf.nocc_act = mf_cas.mol.nelectron // 2
         mf.nvir_act = len(mf_cas.mo_energy) - mf.nocc_act
     else:
-        print('start RCCSD')
         mycc = cc.RCCSD(mf)
-    print('finish RCCSD')
+    #mycc.conv_tol = 1e-8
+    #mycc.conv_tol_normt = 1e-5
+    # ZJ: lower tol temporarily
     mycc.conv_tol = 1e-8
     mycc.conv_tol_normt = 1e-5
     mycc.diis_space = 15
@@ -526,7 +536,9 @@ def cc_gf(mf, freqs, delta, ao_orbs=None, gmres_tol=1e-4, nimp=None,
         feri.close()
     comm.Barrier()
 
-    gf = ccgf.CCGF(mycc, tol=gmres_tol)
+    # ZJ: lower tol temporarily
+    gf = ccgf.CCGF(mycc, tol=1e-4)
+    #gf = ccgf.CCGF(mycc, tol=gmres_tol)
     if cas:
         orbs = range(len(mf_cas.mo_energy))
         if read_gf:
@@ -993,6 +1005,9 @@ def cc_rdm(mf, ao_orbs=None, cas=False, casno='gw', composite=False,
         mycc = cc.RCCSD(mf_cas)
     else:
         mycc = cc.RCCSD(mf)
+    #mycc.conv_tol = 1e-8
+    #mycc.conv_tol_normt = 1e-5
+    # ZJ: lower tol temporarily
     mycc.conv_tol = 1e-8
     mycc.conv_tol_normt = 1e-5
     mycc.diis_space = 15

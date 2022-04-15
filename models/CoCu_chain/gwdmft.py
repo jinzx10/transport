@@ -76,6 +76,20 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     himp_cell = hcore_cell + JK_cell - JK_00
     dmft.JK_00 = JK_00
 
+    # ZJ: 
+    if rank == 0:
+        print('himp_cell = ', himp_cell)
+
+    '''
+    ZJ: below the code is going to construct a bath from the hyb
+    note that here the variable 'hyb' is an array of self energy evaluated on x+i*delta,
+    In get_bath_direct, it's imaginary part (-1/pi*hyb.imag) is used to generate bath_e & bath_v
+
+    The first step in generating a bath is to is to generate a grid of energy points on which
+    the hyb is evaluated. Those values will be used in get_bath_direct. 
+
+    '''
+    
     nw = dmft.nbath
     if wl is None and wh is None:
         wl, wh = -0.4+mu, 0.4+mu
@@ -207,12 +221,15 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     #hyb = get_sigma(gf0_cell, gf_cell[:,ncore:nval,ncore:nval])
     #<===================================================
     hyb = np.zeros((spin,nval,nval,nw), dtype=np.complex)
-    print('nao_full = ', nao_full)
-    print('nao = ', nao)
-    print('nw = ', nw)
-    print('H00.shape = ', H00.shape)
-    print('H01.shape = ', H01.shape)
-    print('himp_cell.shape = ', himp_cell.shape)
+
+    if rank == 0:
+        print('nao of total contact = ', nao_full)
+        print('nao of Co = ', nao)
+        print('nw = ', nw)
+        print('H00.shape = ', H00.shape)
+        print('H01.shape = ', H01.shape)
+        print('himp_cell.shape = ', himp_cell.shape)
+
     for iw in range(nw):
         # surface Green's function of the bath
         z = freqs[iw]+1j*delta
@@ -229,16 +246,15 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         Sigma_L = V_L @ g00 @ V_L.T.conj()
         Sigma_R = V_R @ g00 @ V_R.T.conj()
 
-        # contact block of the full Green's function
+        # contact block of the Green's function
         G_C = np.linalg.inv(z*np.eye(nao_full)-hcore_full[0,0]-JK_dft_full[0,0]-Sigma_L-Sigma_R)
 
-        # impurity block
         # here the impurity merely contains the 6 Co valence orbitals
-        G_imp = G_C[:nval,:nval]
-
         # G_imp = inv(z-h_imp-hyb)
-        hyb[0,:,:,iw] = (freqs[iw] + 1j*delta)*np.eye(nval) - himp_cell[0,:nval,nval] - np.linalg.inv(G_imp)
+        hyb[0,:,:,iw] = (freqs[iw] + 1j*delta)*np.eye(nval) - himp_cell[0,:nval,:nval] \
+                - np.linalg.inv(G_C[:nval,:nval])
     
+    hyb = comm.bcast(hyb,root=0)
 
     #===================================================>
 
@@ -263,6 +279,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         hyb_last = hyb
 
         if dmft.disc_type == 'direct' or dmft.disc_type == 'log' or dmft.disc_type == 'nonlin' or dmft.disc_type == 'nonlin2':
+            # ZJ: bath_e has a length of nw_org*nimp, it goes through all different energies and repeats them
             bath_v, bath_e = get_bath_direct(hyb, freqs, nw_org)
             if rank == 0:
                 logger.info(dmft, 'bath energies = \n %s', bath_e[0][:nw_org])
@@ -294,10 +311,11 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         bath_v = comm.bcast(bath_v,root=0)
         dmft.bath_e = bath_e[0][:nw_org]
 
-        print('bath_e.shape', bath_e.shape)
-        print('bath_v.shape', bath_e.shape)
-        print('freqs.shape', freqs.shape)
-        print('hyb.shape', hyb.shape)
+        if rank == 0:
+            print('bath_e.shape', bath_e.shape)
+            print('bath_v.shape', bath_e.shape)
+            print('freqs.shape', freqs.shape)
+            print('hyb.shape', hyb.shape)
 
         # ZJ: himp has the same size as himp_cell (val+virt orbitals for Co)
         # but only ncore:nval orbitals are coupled to the bath
@@ -314,105 +332,119 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             dm0[:,:nao,:nao] = dm_last[:,:nao,:nao].copy()
 
         # optimize chemical potential for correct number of impurity electrons
-        print('occupancy = ', occupancy)
+        if rank == 0:
+            print('occupancy = ', occupancy)
         if opt_mu:
             mu = mu_fit(dmft, mu, occupancy, himp, eri_imp, dm0)
             comm.Barrier()
             mu = comm.bcast(mu, root=0)
             comm.Barrier()
-        print('optimized mu = ', mu)
 
-        # run HF for embedding problem
-        dmft._scf = mf_kernel(himp, eri_imp, mu, nao, dm0,
-                              max_mem=dmft.max_memory, verbose=dmft.verbose)
+        #if rank == 0:
+        #    print('optimized mu = ', mu)
+        print('rank = ', rank, 'optimized mu = ', mu)
 
-        '''
-        # Get mean-field determinant by diagonalizing imp+bath Ham just once
-        dm_init = np.zeros_like(dm0)
-        dm_init[:,:nao,:nao] = DM_cell[:,:nao,:nao]
-        JK_impbath = scf._get_veff(dm_init, eri_imp)
-        if dmft.mf_type == 'dft':
-            JK_dft_tmp = JK_dft_cell - (JK_cell - JK_00)
-        elif dmft.mf_type == 'hf':
-            JK_dft_tmp = JK_cell - (JK_cell - JK_00)
+
+        # ZJ: get an intial guess for the embedding problem
+        # run a HF scf or just do it one-shot
+        run_hf_embed = True
+
+        if run_hf_embed:
+            if not opt_mu:
+                # run HF for embedding problem
+                mf = mf_kernel(himp, eri_imp, mu, nao, dm0,
+                                  max_mem=dmft.max_memory, verbose=dmft.verbose, JK00=dmft.JK_00)
+                dmft._scf = mf
         else:
-            raise NotImplementedError
+            # Get mean-field determinant by diagonalizing imp+bath Ham just once
+            dm_init = np.zeros_like(dm0)
+            dm_init[:,:nao,:nao] = DM_cell[:,:nao,:nao]
+            JK_impbath = scf._get_veff(dm_init, eri_imp)
+            if dmft.mf_type == 'dft':
+                JK_dft_tmp = JK_dft_cell - (JK_cell - JK_00)
+            elif dmft.mf_type == 'hf':
+                JK_dft_tmp = JK_cell - (JK_cell - JK_00)
+            else:
+                raise NotImplementedError
 
-        JK_impbath[:,:nao,:nao] = JK_dft_tmp[:,:nao,:nao]
-        F_impbath = himp + JK_impbath
-        emo_ib, cmo_ib = linalg.eigh(F_impbath[0])
-        if rank == 0:
-            logger.info(dmft, 'Imp+bath mean-field mo_energy = \n %s', emo_ib)
-        mo_occ_ib = np.zeros_like(emo_ib)
-        mo_occ_ib[emo_ib <= mu] = 2.
-        nocc_ib = int(np.sum(mo_occ_ib) // 2)
-        dm_ib = 2. * np.dot(cmo_ib[:,:nocc_ib], cmo_ib[:,:nocc_ib].T)
-        if rank == 0:
-            logger.info(dmft, 'Imp+bath Nelec = %s', np.trace(dm_ib[:nao,:nao]))
-            logger.info(dmft, 'Imp+bath 1-RDM diag = \n %s', dm_ib[:nao,:nao].diagonal())
-            logger.info(dmft, 'Imp+bath Full 1-RDM diag = \n %s', dm_ib.diagonal())
-
-        from pyscf import gto, ao2mo
-        spin, n = himp.shape[0:2]
-        mol = gto.M()
-        mol.verbose = dmft.verbose
-        mol.incore_anyway = True
-        mol.build()
-
-        mf = scf.RHF(mol, mu)
-        mf.max_memory = dmft.max_memory
-        mf.mo_energy = emo_ib
-        mf.mo_occ = mo_occ_ib
-        mf.mo_coeff = cmo_ib
-        mf.max_cycle = 150
-        mf.conv_tol = 1e-12
-        mf.diis_space = 15
-
-        mf.get_hcore = lambda *args: himp[0]
-        mf.get_ovlp = lambda *args: np.eye(n)
-        mf._eri = ao2mo.restore(8, eri_imp[0], n)
-        del eri_imp
-
-        dm = mf.make_rdm1()
-        if rank == 0:
-            logger.info(dmft, 'Imp+bath 1-RDM diag = \n %s', dm[:nao,:nao].diagonal())
-        dmft._scf = mf
-
-        if dmft.save_mf:
+            JK_impbath[:,:nao,:nao] = JK_dft_tmp[:,:nao,:nao]
+            F_impbath = himp + JK_impbath
+            emo_ib, cmo_ib = linalg.eigh(F_impbath[0])
             if rank == 0:
-                fn = 'mf.h5'
-                feri = h5py.File(fn, 'w')
-                feri['mo_coeff'] = np.asarray(mf.mo_coeff)
-                feri['mo_energy'] = np.asarray(mf.mo_energy)
-                feri['mo_occ'] = np.asarray(mf.mo_occ)
-                feri['himp'] = np.asarray(himp)
-                feri['eri'] = np.asarray(mf._eri)
-                feri.close()
-            comm.Barrier()
+                logger.info(dmft, 'Imp+bath mean-field mo_energy = \n %s', emo_ib)
+            mo_occ_ib = np.zeros_like(emo_ib)
+            mo_occ_ib[emo_ib <= mu] = 2.
+            nocc_ib = int(np.sum(mo_occ_ib) // 2)
+            dm_ib = 2. * np.dot(cmo_ib[:,:nocc_ib], cmo_ib[:,:nocc_ib].T)
+            if rank == 0:
+                logger.info(dmft, 'Imp+bath Nelec = %s', np.trace(dm_ib[:nao,:nao]))
+                logger.info(dmft, 'Imp+bath 1-RDM diag = \n %s', dm_ib[:nao,:nao].diagonal())
+                logger.info(dmft, 'Imp+bath Full 1-RDM diag = \n %s', dm_ib.diagonal())
 
-        if dmft.load_mf:
-            fn = 'mf.h5'
-            feri = h5py.File(fn, 'r')
-            mf.mo_coeff = np.array(feri['mo_coeff'])
-            mf.mo_energy = np.array(feri['mo_energy'])
-            mf.mo_occ = np.array(feri['mo_occ'])
-            himp = np.array(feri['himp'])
-            mf._eri = np.array(feri['eri'])
-            feri.close()
+            from pyscf import gto, ao2mo
+            spin, n = himp.shape[0:2]
+            mol = gto.M()
+            mol.verbose = dmft.verbose
+            mol.incore_anyway = True
+            mol.build()
+
+            mf = scf.RHF(mol, mu)
+            mf.max_memory = dmft.max_memory
+            mf.mo_energy = emo_ib
+            mf.mo_occ = mo_occ_ib
+            mf.mo_coeff = cmo_ib
+            mf.max_cycle = 150
+            mf.conv_tol = 1e-12
+            mf.diis_space = 15
+
             mf.get_hcore = lambda *args: himp[0]
             mf.get_ovlp = lambda *args: np.eye(n)
+            mf._eri = ao2mo.restore(8, eri_imp[0], n)
+            del eri_imp
 
-        mf.JK = JK_impbath[0]
-        JK_hf = JK_impbath.copy()
-        JK_hf[:,:nao,:nao] = JK_00[:,:nao,:nao]
-        mf.JK_hf = JK_hf[0]
-        mf.dm_init = dm_init[0]
-        mf.nimp = nao
-        '''
+            dm = mf.make_rdm1()
+            if rank == 0:
+                logger.info(dmft, 'Imp+bath 1-RDM diag = \n %s', dm[:nao,:nao].diagonal())
 
-        print('dmft.max_cycle = ', dmft.max_cycle)
+            if dmft.save_mf:
+                if rank == 0:
+                    fn = 'mf.h5'
+                    feri = h5py.File(fn, 'w')
+                    feri['mo_coeff'] = np.asarray(mf.mo_coeff)
+                    feri['mo_energy'] = np.asarray(mf.mo_energy)
+                    feri['mo_occ'] = np.asarray(mf.mo_occ)
+                    feri['himp'] = np.asarray(himp)
+                    feri['eri'] = np.asarray(mf._eri)
+                    feri.close()
+                comm.Barrier()
+
+            if dmft.load_mf:
+                fn = 'mf.h5'
+                feri = h5py.File(fn, 'r')
+                mf.mo_coeff = np.array(feri['mo_coeff'])
+                mf.mo_energy = np.array(feri['mo_energy'])
+                mf.mo_occ = np.array(feri['mo_occ'])
+                himp = np.array(feri['himp'])
+                mf._eri = np.array(feri['eri'])
+                feri.close()
+                mf.get_hcore = lambda *args: himp[0]
+                mf.get_ovlp = lambda *args: np.eye(n)
+
+            mf.JK = JK_impbath[0]
+            JK_hf = JK_impbath.copy()
+            JK_hf[:,:nao,:nao] = JK_00[:,:nao,:nao]
+            mf.JK_hf = JK_hf[0]
+            mf.dm_init = dm_init[0]
+            mf.nimp = nao
+
+            dmft._scf = mf
+
+        #print('sum(mf.mo_occ) = ', np.sum(mf.mo_occ))
+
+        # ZJ: for one-shot DMFT (max_cycle == 0) the kernel function exit below
         if dmft.max_cycle <= 1:
             break
+
         dm_last = dmft._scf.make_rdm1()
         if len(dm_last.shape) == 2:
             dm_last = dm_last[np.newaxis, ...]
@@ -431,9 +463,10 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             gf_imp = np.zeros((spin,nao,nao,nw),dtype=np.complex128)
 
             # ZJ: the line below contains the core impurity solver
-            print('ready to solve the impurity problem')
+            # ZJ: the code won't reach here!
+            #print('ready to solve the impurity problem')
             gf_imp[:,nfrz:,nfrz:,:] = dmft.get_gf_imp(freqs, delta)
-            print('impurity problem solved!')
+            #print('impurity problem solved!')
 
             if dmft.solver_type == 'cc' or dmft.solver_type == 'ucc':
                 gf_imp = 0.5 * (gf_imp+gf_imp.transpose(0,2,1,3))
@@ -448,7 +481,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             sigma_imp = get_sigma(gf0_imp, gf_imp)
         else:
             # imp+bath GF -> imp+bath sigma -> imp sigma
-            print('ready to solve the impurity problem')
+            #print('ready to solve the impurity problem')
             # ZJ: the line below contains the core impurity solver
             sigma_imp = dmft.get_sigma_imp(freqs, delta)
             sigma_imp = sigma_imp[:,:nao,:nao]
@@ -514,7 +547,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
 
 
 def mu_fit(dmft, mu0, occupancy, himp, eri_imp, dm0, step=0.02, trust_region=0.03,
-           nelec_tol=2e-3, max_cycle=5):
+           nelec_tol=1e-5, max_cycle=50):
     '''
     Fit chemical potential to find target impurity occupancy
     '''
@@ -528,8 +561,7 @@ def mu_fit(dmft, mu0, occupancy, himp, eri_imp, dm0, step=0.02, trust_region=0.0
         # run HF for embedding problem
         mu = mu0 + dmu
         dmft._scf = mf_kernel(himp, eri_imp, mu, dmft.nao, dm0,
-                              max_mem=dmft.max_memory, verbose=4)
-
+                              max_mem=dmft.max_memory, verbose=4, JK00=dmft.JK_00)
         # run ground-state impurity solver to get 1-rdm
         rdm = dmft.get_rdm_imp()
         nelec = np.trace(rdm)
@@ -539,7 +571,7 @@ def mu_fit(dmft, mu0, occupancy, himp, eri_imp, dm0, step=0.02, trust_region=0.0
         if abs(dnelec) < nelec_tol * occupancy:
             break
         if mu_cycle > 0:
-            if abs(dnelec - dnelec_old) < 1e-3:
+            if abs(dnelec - dnelec_old) < 1e-5:
                 if rank == 0:
                     logger.info(dmft, 'Electron number not affected by dmu, quit mu_fit')
                 break
@@ -832,8 +864,6 @@ def imp_ham(hcore_cell, eri_cell, bath_v, bath_e, ncore):
     for s in range(spin):
         himp[s,nao:,nao:] = np.diag(bath_e[s])
 
-    print('imp_ham: nao = ', nao)
-    print('imp_ham: nbath = ', nbath)
     eri_imp = np.zeros([spin*(spin+1)//2, nao+nbath, nao+nbath, nao+nbath, nao+nbath])
     eri_imp[:,:nao,:nao,:nao,:nao] = eri_cell
     return himp, eri_imp
@@ -1213,10 +1243,8 @@ class DMFT(lib.StreamObject):
 
         self.dump_flags()
 
-        print('self kernel ready!')
         self.converged, self.mu = kernel(self, mu0, wl=wl, wh=wh, occupancy=occupancy, delta=delta,
                                          conv_tol=conv_tol, opt_mu=opt_mu, dump_chk=dump_chk, H00=H00, H01=H01)
-        print('self kernel done!')
 
         if rank == 0:
             self._finalize()
@@ -1241,7 +1269,6 @@ class DMFT(lib.StreamObject):
 
     def get_rdm_imp(self):
         '''Calculate the interacting local RDM from the impurity problem'''
-        print('ready to compute imp rdm!')
         if self.solver_type == 'cc':
             assert(self.nfrz == 0)
             return cc_rdm(self._scf, ao_orbs=range(self.nao), cas=self.cas, casno=self.casno,
@@ -1328,7 +1355,6 @@ class DMFT(lib.StreamObject):
 
         if self.solver_type == 'cc':
             assert(self.nfrz == 0)
-            print('start cc_gf')
             gf = cc_gf(self._scf, freqs, delta, ao_orbs=range(nmo), gmres_tol=self.gmres_tol,
                        nimp=self.nao, cas=self.cas, casno=self.casno, composite=self.composite,
                        thresh=self.thresh, nvir_act=self.nvir_act, nocc_act=self.nocc_act,
@@ -1381,6 +1407,10 @@ class DMFT(lib.StreamObject):
         nao = self.nao
         nmo = len(self._scf.mo_energy)
 
+        if rank == 0:
+            print('start get_ldos_imp')
+
+        #<============================================================================
         if self.solver_type == 'cc':
             if self.cc_ao_orbs is None:
                 self.cc_ao_orbs = range(nmo)
@@ -1388,15 +1418,43 @@ class DMFT(lib.StreamObject):
         elif self.solver_type == 'dmrg':
             ao_orbs = range(nmo)
 
+        # ZJ: tmp
+        ao_orbs = range(6)
+
         if extra_delta is None:
             gf0_full = self.get_gf0_imp(freqs, delta)
         else:
             gf0_full = self.get_gf0_imp(np.array(extra_freqs).reshape(-1), extra_delta)
             nw = len(np.array(extra_freqs).reshape(-1))
 
+        #<==============================================================
+        # ZJ: for comparison, compute HF GF anyway
+        gf_hf = mf_gf(self._scf, freqs, delta)
+
+        # ZJ: first 6 valence
+        ldos_0 = -1./np.pi*(gf_hf[0,0,0,:].imag)
+        ldos_1 = -1./np.pi*(gf_hf[0,1,1,:].imag)
+        ldos_2 = -1./np.pi*(gf_hf[0,2,2,:].imag)
+        ldos_3 = -1./np.pi*(gf_hf[0,3,3,:].imag)
+        ldos_4 = -1./np.pi*(gf_hf[0,4,4,:].imag)
+        ldos_5 = -1./np.pi*(gf_hf[0,5,5,:].imag)
+
+        fn = 'ldos.dat'
+        if rank == 0:
+            f = h5py.File(fn, 'w')
+            f['freqs'] = freqs
+            f['ldos_hf_0'] = ldos_0
+            f['ldos_hf_1'] = ldos_1
+            f['ldos_hf_2'] = ldos_2
+            f['ldos_hf_3'] = ldos_3
+            f['ldos_hf_4'] = ldos_4
+            f['ldos_hf_5'] = ldos_5
+        #==============================================================>
+
         if self.solver_type == 'hf':
             gf = mf_gf(self._scf, freqs, delta)
         else:
+            # ZJ: the function below contains the core subroutine 'cc_gf'
             gf = self.get_gf_imp(freqs, delta, ao_orbs=ao_orbs,
                                  extra_freqs=extra_freqs, extra_delta=extra_delta, use_gw=use_gw)
 
@@ -1463,6 +1521,25 @@ class DMFT(lib.StreamObject):
                 sigma[:,ia,ia,:] = sigma_full[:,a,a,:]
             ldos_t2g = -1./np.pi*(gf[:,idx[0],idx[0],:].imag)
             ldos_eg = -1./np.pi*(gf[:,idx[1],idx[1],:].imag)
+
+        #<============================================================================
+
+        # ZJ: first 6 valence
+        ldos_0 = -1./np.pi*(gf[0,0,0,:].imag)
+        ldos_1 = -1./np.pi*(gf[0,1,1,:].imag)
+        ldos_2 = -1./np.pi*(gf[0,2,2,:].imag)
+        ldos_3 = -1./np.pi*(gf[0,3,3,:].imag)
+        ldos_4 = -1./np.pi*(gf[0,4,4,:].imag)
+        ldos_5 = -1./np.pi*(gf[0,5,5,:].imag)
+
+        if rank == 0:
+            f['ldos_cc_0'] = ldos_0
+            f['ldos_cc_1'] = ldos_1
+            f['ldos_cc_2'] = ldos_2
+            f['ldos_cc_3'] = ldos_3
+            f['ldos_cc_4'] = ldos_4
+            f['ldos_cc_5'] = ldos_5
+            f.close()
 
         return ldos_t2g, ldos_eg, sigma
 
