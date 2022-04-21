@@ -86,7 +86,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
 
     # ZJ: 
     if rank == 0:
-        print('himp_cell = ', himp_cell)
+        print('log_disc_base = ', log_disc_base)
 
     '''
     ZJ: below the code is going to construct a bath from the hyb
@@ -148,6 +148,8 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         # ZJ: log grid not necessarily symmetric
         # wl and wh is the (absolute) band edge (not distance to mu)
         nbath = dmft.nbath
+        if rank == 0:
+            print('gen log grid!')
 
         # mu to left band edge is smaller, use less orbitals
         nl = nbath // 2 - 1
@@ -1306,7 +1308,7 @@ class DMFT(lib.StreamObject):
         self.dump_flags()
 
         self.converged, self.mu = kernel(self, mu0, wl=wl, wh=wh, occupancy=occupancy, delta=delta,
-                                         conv_tol=conv_tol, opt_mu=opt_mu, dump_chk=dump_chk, H00=H00, H01=H01)
+                                         conv_tol=conv_tol, opt_mu=opt_mu, dump_chk=dump_chk, H00=H00, H01=H01, log_disc_base=log_disc_base)
 
         if rank == 0:
             self._finalize()
