@@ -54,14 +54,14 @@ def dmft_abinitio():
 
     # ZJ: when this option is turned on, mu is optimized during EACH DMFT cycle,
     # and for every optimization, get_rdm_imp is called multiple times until convergence.
-    opt_mu = True
+    opt_mu = False
 
     # ZJ: for Kondo problems, 'log' (or a hybrid scheme that contains 
-    # log discretization near the Fermi level) might be necessary
+    # fine discretization near the Fermi level) might be necessary
     #disc_type = 'nonlin2'
-    disc_type = 'log'
+    disc_type = 'DISC_TYPE'
 
-    solver_type = 'cc'
+    solver_type = 'SOLVER_TYPE'
     dmft_max_cycle = 0
     max_memory = 60000
     chkfile = 'DMFT_chk.h5'
@@ -74,19 +74,28 @@ def dmft_abinitio():
 
     # ZJ: small imaginary number in the retarded Green's function (inv(z-H), z=E+i*delta)
     # delta = 0.05 is a threshold, see gwdmft.py
-    delta = 0.03
+    delta = DELTA
 
     #mu = 0.623759012177
     #mu = -0.1613936097992017 # Cu chain's HOMO
     #mu = -0.090157
-    mu = -0.07134028
+    mu = CHEMICAL_POTENTIAL 
 
     #nbath = 49
-    nbath = 15
+    # number of bath energies (not orbitals)
+    # total number of bath orbitals equals nbath*nb_per_e
+    nbath = NUM_BATH_ENERGY
 
-    nb_per_e = 6
-    wl0 = -0.3
-    wh0 = 0.3
+    # base for log discretization
+    log_disc_base = LOG_DISC_BASE
+
+    nb_per_e = NUM_BATH_PER_ENERGY
+
+    # bath energy range with respect to mu
+    # the bath will be discretized within wl0+mu, wh0+mu
+    # hybridization is significant between -0.3 and 0.3
+    wl0 = -0.25
+    wh0 = 0.4
 
     ncore = 0
     nval = 6
@@ -134,9 +143,8 @@ def dmft_abinitio():
         vno_only : bool
             Only construct virtual natural orbitals. Default is True.
     '''
-    cas = False
-    #cas = True
-    casno = 'cc'
+    cas = DO_CAS
+    casno = 'CASNO'
     composite = False
     thresh = 5e-3
     nvir_act = 11
@@ -343,7 +351,8 @@ def dmft_abinitio():
     mydmft.save_mf = save_mf
 
     #mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu)
-    mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu, H00=H00, H01=H01)
+    mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu, H00=H00, H01=H01, \
+            log_disc_base=log_disc_base)
     occupancy = 0.
     occupancy = np.trace(mydmft.get_rdm_imp())
     if rank == 0:
@@ -374,8 +383,12 @@ def dmft_abinitio():
             extra_delta = None
 
         # ZJ: temp freqs
-        nw = 100
-        freqs = np.linspace(mydmft.mu-0.2, mydmft.mu+0.2, nw)
+        nw1 = 80
+        nw2 = 20
+        freqs1 = np.linspace(mydmft.mu-0.4, mydmft.mu+0.4, nw1)
+        freqs2 = np.linspace(mydmft.mu-0.01, mydmft.mu+0.01, nw2)
+        freqs = np.concatenate((freqs1,freqs2))
+        freqs = np.sort(freqs)
 
         # Get impurity DOS (production run)
         ldos_t2g, ldos_eg, sigma = mydmft.get_ldos_imp(freqs, eta, extra_freqs=extra_freqs,

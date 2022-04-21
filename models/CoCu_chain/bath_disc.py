@@ -14,7 +14,8 @@ def direct_disc_hyb(hyb, grid, nint=1, nbath_per_ene=None, eig_tol=1e-8):
     grid should be a 1-d array, and the shape of hyb should be (len(grid), nimp, nimp).
     In this mode, nint determines how many intervals are grouped together to generate one bath energy.
     For example, if nint=3, then grid[0:4] (4 points, 3 intervals) will generate the first bath energy, 
-    and grid[3:7] will generate the second bath energy, etc.
+    and grid[3:7] will generate the second bath energy, etc. In order to get M bath energies, the grid
+    needs to contain nint*M+1 points.
 
     In the second mode, one passes in a callable hyb, and a 1-d array grid.
     In this mode, grid directly defines the intervals where each bath energy is generated, and nint
@@ -80,6 +81,7 @@ def direct_disc_hyb(hyb, grid, nint=1, nbath_per_ene=None, eig_tol=1e-8):
         e[ie] = xTrhybint / hybint.trace()
         val, vec = np.linalg.eigh(hybint)
 
+        #print('val = ', val)
         idx_negval = np.where(val < 0)
         bignegval = val[idx_negval][val[idx_negval] < -eig_tol]
         if len(bignegval) != 0:

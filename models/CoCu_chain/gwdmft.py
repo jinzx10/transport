@@ -20,6 +20,7 @@ from dmft_solver import mf_kernel, mf_gf, mf_gf_withfrz, \
                 dmrg_rdm, udmrg_rdm, fci_gf, fci_rdm, get_gf, get_sigma
 from mpi4py import MPI
 from surface_green import *
+from bath_disc import *
 
 einsum = lib.einsum
 
@@ -27,12 +28,19 @@ rank = MPI.COMM_WORLD.Get_rank()
 size = MPI.COMM_WORLD.Get_size()
 comm = MPI.COMM_WORLD
 
+# generate 
+def gen_log_grid(w0, w, l, num):
+    grid = w0 + (w-w0) * l**(-np.arange(num,dtype=float))
+    if w > w0:
+        return grid[::-1]
+    else:
+        return grid
 # ****************************************************************************
 # core routines: kernel, mu_fit
 # ****************************************************************************
 
 def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
-           conv_tol=None, opt_mu=False, dump_chk=True, H00=None, H01=None):
+           conv_tol=None, opt_mu=False, dump_chk=True, H00=None, H01=None, log_disc_base=1.7):
     '''DMFT self-consistency cycle at fixed mu'''
     cput0 = (time.process_time(), time.time())
 
@@ -135,7 +143,21 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         nw_org = nw
         wmult = 3
         nw = nw * wmult + 1
-        freqs = _get_log_freqs(wl, wh, nw, expo=1.2)
+        
+        #<============================================================
+        # ZJ: log grid not necessarily symmetric
+        # wl and wh is the (absolute) band edge (not distance to mu)
+        nbath = dmft.nbath
+
+        # mu to left band edge is smaller, use less orbitals
+        nl = nbath // 2 - 1
+        nh = nbath - nl
+
+        freqs = np.concatenate((gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
+                gen_log_grid(mu, wh, log_disc_base, nh)))
+        #============================================================>
+
+        #freqs = _get_log_freqs(wl, wh, nw, expo=1.2)
         wts = None
     elif dmft.disc_type == 'opt':
         nw_org = nw
@@ -214,13 +236,42 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     sigma_full = np.zeros((spin,nao_full,nao_full,nw), dtype=np.complex)
     gf0_cell = get_gf((hcore_cell_band+JK_dft_cell_band)[:,ncore:nval,ncore:nval], sigma[:,ncore:nval,ncore:nval], freqs, delta)
     gf_cell = np.zeros((spin,nao_full,nao_full,nw), dtype=np.complex)
-    for k in range(nkpts_hyb):
-        gf_cell += 1./nkpts_hyb * get_gf(hcore_full_band[:,k]+JK_dft_full_band[:,k], sigma_full, freqs, delta)
+    # ZJ: temporarily comment this out!
+    #for k in range(nkpts_hyb):
+    #    gf_cell += 1./nkpts_hyb * get_gf(hcore_full_band[:,k]+JK_dft_full_band[:,k], sigma_full, freqs, delta)
 
     # ZJ: change the hyb below
     #hyb = get_sigma(gf0_cell, gf_cell[:,ncore:nval,ncore:nval])
     #<===================================================
+    def Gamma(e):
+        # -1/pi*imag(Sigma(e+i*delta))
+        z = e + 1j*delta
+        g00 = Umerski1997(z, H00, H01)
+        sz_blk, _ = g00.shape
+
+        # compute G_C (the Green's function of the whole contact block)
+        V_L = np.zeros((nao_full,sz_blk), dtype=complex)
+        V_R = np.zeros((nao_full,sz_blk), dtype=complex)
+
+        V_L[22:22+sz_blk,:] = H01.T.conj()
+        V_R[-sz_blk:,:] = H01
+
+        Sigma_L = V_L @ g00 @ V_L.T.conj()
+        Sigma_R = V_R @ g00 @ V_R.T.conj()
+
+        # contact block of the Green's function
+        G_C = np.linalg.inv(z*np.eye(nao_full)-hcore_full[0,0]-JK_dft_full[0,0]-Sigma_L-Sigma_R)
+
+        # here the impurity merely contains the 6 Co valence orbitals
+        # G_imp = inv(z-h_imp-Sigma_imp)
+        Sigma_imp = z*np.eye(nval) - himp_cell[0,:nval,:nval] - np.linalg.inv(G_C[:nval,:nval])
+        return -1./np.pi*Sigma_imp.imag
+
+
+
+
     hyb = np.zeros((spin,nval,nval,nw), dtype=np.complex)
+    '''
 
     if rank == 0:
         print('nao of total contact = ', nao_full)
@@ -256,11 +307,12 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     
     hyb = comm.bcast(hyb,root=0)
 
-    #===================================================>
-
     if rank == 0:
         write.write_sigma(tmpdir+'/dmft_hyb', freqs, hyb)
     comm.Barrier()
+
+    #===================================================>
+    '''
 
     if isinstance(dmft.diis, lib.diis.DIIS):
         dmft_diis = dmft.diis
@@ -280,7 +332,17 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
 
         if dmft.disc_type == 'direct' or dmft.disc_type == 'log' or dmft.disc_type == 'nonlin' or dmft.disc_type == 'nonlin2':
             # ZJ: bath_e has a length of nw_org*nimp, it goes through all different energies and repeats them
-            bath_v, bath_e = get_bath_direct(hyb, freqs, nw_org)
+            #bath_v, bath_e = get_bath_direct(hyb, freqs, nw_org)
+
+            # ZJ: direct_disc_hyb returns e as a 1-d array of nbath elements
+            # and v as a 2-d array of (nbath,nimp,nb_per_e) 
+            bath_e, bath_v = direct_disc_hyb(Gamma, freqs, nint=5, nbath_per_ene = nb_per_e)
+            bath_e = np.tile(bath_e, nb_per_e)
+            bath_e = bath_e[np.newaxis,...]
+            bath_v = np.transpose(bath_v, (1,2,0))
+            bath_v = bath_v.reshape((nval,nbath*nb_per_e))
+            bath_v = bath_v[np.newaxis,...]
+
             if rank == 0:
                 logger.info(dmft, 'bath energies = \n %s', bath_e[0][:nw_org])
         elif dmft.disc_type == 'opt':
@@ -313,7 +375,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
 
         if rank == 0:
             print('bath_e.shape', bath_e.shape)
-            print('bath_v.shape', bath_e.shape)
+            print('bath_v.shape', bath_v.shape)
             print('freqs.shape', freqs.shape)
             print('hyb.shape', hyb.shape)
 
@@ -342,7 +404,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
 
         #if rank == 0:
         #    print('optimized mu = ', mu)
-        print('rank = ', rank, 'optimized mu = ', mu)
+        print('rank = ', rank, 'opt_mu = ', opt_mu, 'mu = ', mu)
 
 
         # ZJ: get an intial guess for the embedding problem
@@ -1208,7 +1270,7 @@ class DMFT(lib.StreamObject):
         return sigma
 
     def kernel(self, mu0, wl=None, wh=None, occupancy=None, delta=0.1,
-               conv_tol=None, opt_mu=False, dump_chk=True, H00=None, H01=None):
+               conv_tol=None, opt_mu=False, dump_chk=True, H00=None, H01=None, log_disc_base=1.7):
         '''
         main routine for DMFT
 
@@ -1439,7 +1501,7 @@ class DMFT(lib.StreamObject):
         ldos_4 = -1./np.pi*(gf_hf[0,4,4,:].imag)
         ldos_5 = -1./np.pi*(gf_hf[0,5,5,:].imag)
 
-        fn = 'ldos.dat'
+        fn = 'ldos-%i-%s-%s.dat'%(self.nbath, self.disc_type, self.solver_type)
         if rank == 0:
             f = h5py.File(fn, 'w')
             f['freqs'] = freqs
