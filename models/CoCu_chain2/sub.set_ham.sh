@@ -1,24 +1,29 @@
 #!/bin/bash
 
 #SBATCH --output=slurm.out
-#SBATCH --partition=serial,parallel,smallmem
+#SBATCH --partition=serial
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=28
-#SBATCH --mem=100G
+#SBATCH --mem=120G
 #SBATCH --job-name=CoCu_set_ham
 
 source $HOME/.bashrc
 conda activate
 
-dir=$HOME/projects/transport/models/CoCu_chain
-datadir=${dir}/Co_svp_Cu_svp_bracket_pbe_v2
+export MKL_NUM_THREADS=28
+export OMP_NUM_THREADS=28
+
+dir=$HOME/projects/transport/models/CoCu_chain2
+datadir=${dir}/Co_svp_Cu_svp_bracket
 
 cd ${dir}
 mkdir -p ${datadir}
 
-timestamp=`date +%y%m%d-%H%M%S`
-output="CoCu_set_ham_${timestamp}.out"
+gate=0.05
+output=CoCu_set_ham_gate${gate}.out
 
-python ${dir}/CoCu_set_ham_v2.py --datadir=${datadir} > ${datadir}/${output}
+sed "s/GATE/${gate}/" ${dir}/CoCu_set_ham.py > ${dir}/CoCu_set_ham_gate${gate}.py
+
+python ${dir}/CoCu_set_ham_gate${gate}.py --datadir=${datadir} > ${datadir}/${output}

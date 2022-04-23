@@ -10,7 +10,7 @@ from pyscf.pbc.lib import chkfile
 
 from libdmet_solid.lo.iao import reference_mol
 
-gate = GATE
+gate = -0.050
 
 ############################################################
 #           directory for saving/loading data
@@ -66,9 +66,9 @@ nao_Cu = nval_Cu + nvirt_Cu
 # be better computed by the DFT's Fock matrix
 
 # if False, use HF instead
-use_pbe = USE_PBE
+use_pbe = True
 
-do_restricted = DO_RESTRICTED
+do_restricted = True
 
 if do_restricted:
     method_label = 'r'
