@@ -15,7 +15,6 @@ from fcdmft.utils import write
 #from fcdmft.dmft import gwdmft
 import gwdmft
 from mpi4py import MPI
-from dmft_solver import mf_gf
 
 rank = MPI.COMM_WORLD.Get_rank()
 size = MPI.COMM_WORLD.Get_size()
@@ -60,9 +59,9 @@ def dmft_abinitio():
     # ZJ: for Kondo problems, 'log' (or a hybrid scheme that contains 
     # fine discretization near the Fermi level) might be necessary
     #disc_type = 'nonlin2'
-    disc_type = 'DISC_TYPE'
+    disc_type = 'log'
 
-    solver_type = 'SOLVER_TYPE'
+    solver_type = 'cc'
     dmft_max_cycle = 0
     max_memory = 30000
     chkfile = 'DMFT_chk.h5'
@@ -75,31 +74,28 @@ def dmft_abinitio():
 
     # ZJ: small imaginary number in the retarded Green's function (inv(z-H), z=E+i*delta)
     # delta = 0.05 is a threshold, see gwdmft.py
-    delta = DELTA
+    delta = 0.01
 
     #mu = 0.623759012177
     #mu = -0.1613936097992017 # Cu chain's HOMO
-    mu = CHEMICAL_POTENTIAL 
-
-    gate = GATE
+    #mu = -0.090157
+    mu = -0.075 
 
     #nbath = 49
     # number of bath energies (not orbitals)
     # total number of bath orbitals equals nbath*nb_per_e
-    nbath = NUM_BATH_ENERGY
+    nbath = 17
 
     # base for log discretization
-    log_disc_base = LOG_DISC_BASE
+    log_disc_base = 1.5
 
-    nb_per_e = NUM_BATH_PER_ENERGY
+    nb_per_e = 4
 
     # bath energy range with respect to mu
     # the bath will be discretized within wl0+mu, wh0+mu
     # hybridization is significant between -0.3 and 0.3
-    #wl0 = -0.25
-    #wh0 = 0.4
-    wl0 = WL_MU
-    wh0 = WH_MU
+    wl0 = -0.25
+    wh0 = 0.4
 
     ncore = 0
     nval = 6
@@ -120,8 +116,8 @@ def dmft_abinitio():
     Ha2eV = 27.211386
     wl = 16.2/Ha2eV
     wh = 17.6/Ha2eV
-    eta = 0.005/Ha2eV
-    gmres_tol = 1e-3
+    eta = 0.3/Ha2eV
+    gmres_tol = 1e-4
 
     '''
     specific parameters for CAS treatment of impurity problem:
@@ -147,8 +143,8 @@ def dmft_abinitio():
         vno_only : bool
             Only construct virtual natural orbitals. Default is True.
     '''
-    cas = DO_CAS
-    casno = 'CASNO'
+    cas = False
+    casno = 'ci'
     composite = False
     thresh = 5e-3
     nvir_act = 11
@@ -203,13 +199,6 @@ def dmft_abinitio():
     hcore_full = np.asarray(feri['hcore_lo_nc'])
     JK_dft_full = np.asarray(feri['JK_lo_nc'])
     feri.close()
-
-    #<===============================
-    # apply gate voltage
-    nao_Co = hcore_k.shape[2]
-    hcore_k[0,0] = hcore_k[0,0] + gate*np.eye(nao_Co)
-    hcore_full[0,0,:nao_Co,:nao_Co] = hcore_full[0,0,:nao_Co,:nao_Co] + gate*np.eye(nao_Co)
-    #===============================>
 
     # read imp HF-JK matrix
     fn = datadir + '/JK_lo_hf_' + label + '.h5'
@@ -287,13 +276,16 @@ def dmft_abinitio():
     H01 = F_bath[0, :nlo_blk, nlo_blk:2*nlo_blk]
 
     #=======================================================>
+    if rank == 0:
+        print('rank 0: H00 = ', H00)
+    if rank == 1:
+        print('rank 1: H00 = ', H00)
 
     comm.Barrier()
 
     # run self-consistent DMFT
     mydmft = gwdmft.DMFT(hcore_k, JK_k, DM_k, eri_new, nval, ncore, nfrz, nbath,
-                       nb_per_e, disc_type=disc_type, solver_type=solver_type, 
-                       H00=H00, H01=H01, log_disc_base=log_disc_base)
+                       nb_per_e, disc_type=disc_type, solver_type=solver_type)
     mydmft.gw_dmft = gw_dmft
     mydmft.verbose = 5
     mydmft.diis = True
@@ -358,15 +350,13 @@ def dmft_abinitio():
     mydmft.load_mf = load_mf
     mydmft.save_mf = save_mf
 
-    mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu)
+    #mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu)
+    mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu, H00=H00, H01=H01, \
+            log_disc_base=log_disc_base)
     occupancy = 0.
     occupancy = np.trace(mydmft.get_rdm_imp())
     if rank == 0:
         print ('At mu =', mydmft.mu, ', occupancy =', occupancy)
-
-    calc_occ_only = CALC_OCC_ONLY
-    if calc_occ_only:
-        exit()
 
     mydmft.verbose = 5
     mydmft._scf.mol.verbose = 5
@@ -392,34 +382,13 @@ def dmft_abinitio():
             extra_freqs = None
             extra_delta = None
 
-        # ZJ: freqs on which ldos is computed
-        freqs = np.linspace(mydmft.mu-0.005, mydmft.mu+0.005, 200)
-
-        #<====================================================
-        # ZJ: get impurity DOS
-
-        # compute a mean-field gf for comparison
-        gf_hf = mf_gf(mydmft._scf, freqs, eta)
-
-
-        fn = 'LDOS_FILE_NAME'
-        if rank == 0:
-            f = h5py.File(fn, 'w')
-            f['freqs'] = freqs
-            # first 6 are valence
-            for i in range(6):
-                f['ldos_hf_'+str(i)] = -1./np.pi*(gf_hf[0,i,i,:].imag)
-
-        gf = mydmft.get_gf_imp(freqs, eta, ao_orbs=range(6), 
-                extra_freqs=None, extra_delta=None, use_gw=False)
-
-        if rank == 0:
-            for i in range(6):
-                f['ldos_cc_'+str(i)] = -1./np.pi*(gf[0,i,i,:].imag)
-            f.close()
-
-        exit()
-        #====================================================>
+        # ZJ: temp freqs
+        nw1 = 80
+        nw2 = 20
+        freqs1 = np.linspace(mydmft.mu-0.4, mydmft.mu+0.4, nw1)
+        freqs2 = np.linspace(mydmft.mu-0.01, mydmft.mu+0.01, nw2)
+        freqs = np.concatenate((freqs1,freqs2))
+        freqs = np.sort(freqs)
 
         # Get impurity DOS (production run)
         ldos_t2g, ldos_eg, sigma = mydmft.get_ldos_imp(freqs, eta, extra_freqs=extra_freqs,

@@ -32,12 +32,12 @@ fname = contact_dir + '/hcore_JK_lo_dft_' + label + '.h5'
 fh = h5py.File(fname, 'r')
 
 # Co atom block only
-hcore_Co = np.asarray(fh['hcore_lo_Co'])
-JK_dft_Co = np.asarray(fh['JK_lo_Co'])
+hcore_Co = np.asarray(fh['hcore_lo_ncCo'])
+JK_dft_Co = np.asarray(fh['JK_lo_ncCo'])
 
 # entire center region, Co + 9 Cu atoms
-hcore = np.asarray(fh['hcore_lo'])
-JK_dft = np.asarray(fh['JK_lo'])
+hcore = np.asarray(fh['hcore_lo_nc'])
+JK_dft = np.asarray(fh['JK_lo_nc'])
 fh.close()
 
 
@@ -46,10 +46,10 @@ fname = contact_dir + '/JK_lo_hf_' + label + '.h5'
 fh = h5py.File(fname, 'r')
 
 # Co atom block only
-JK_hf_Co = np.asarray(fh['JK_lo_Co'])
+JK_hf_Co = np.asarray(fh['JK_lo_ncCo'])
 
 # entire center region, Co + 9 Cu atoms
-JK_hf = np.asarray(fh['JK_lo'])
+JK_hf = np.asarray(fh['JK_lo_nc'])
 fh.close()
 
 
@@ -57,13 +57,13 @@ fh.close()
 # the Co's density matrix is used to 
 fname = contact_dir + '/DM_lo_' + label + '.h5'
 fh = h5py.File(fname, 'r')
-DM_Co = np.asarray(fh['DM_lo_Co'])
+DM_Co = np.asarray(fh['DM_lo_ncCo'])
 fh.close()
 
 #------------ read ERI ------------
 fname = contact_dir + '/eri_lo_' + label + '.h5'
 fh = h5py.File(fname, 'r')
-eri_Co = np.asarray(fh['eri_lo_Co'])
+eri_Co = np.asarray(fh['eri_lo_ncCo'])
 fh.close()
 
 nao = hcore.shape[1]
@@ -75,8 +75,11 @@ gate = -0.062
 hcore_Co[0] = hcore_Co[0] + gate*np.eye(nao_Co)
 hcore[0,:nao_Co,:nao_Co] = hcore[0,:nao_Co,:nao_Co] + gate*np.eye(hcore_Co.shape[1])
 #===============================>
+print(hcore_Co.shape)
+print(hcore.shape)
 
 exit()
+
 ############################################################
 #               impurity block
 ############################################################

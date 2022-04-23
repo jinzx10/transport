@@ -60,9 +60,9 @@ def dmft_abinitio():
     # ZJ: for Kondo problems, 'log' (or a hybrid scheme that contains 
     # fine discretization near the Fermi level) might be necessary
     #disc_type = 'nonlin2'
-    disc_type = 'DISC_TYPE'
+    disc_type = 'log'
 
-    solver_type = 'SOLVER_TYPE'
+    solver_type = 'cc'
     dmft_max_cycle = 0
     max_memory = 30000
     chkfile = 'DMFT_chk.h5'
@@ -75,31 +75,31 @@ def dmft_abinitio():
 
     # ZJ: small imaginary number in the retarded Green's function (inv(z-H), z=E+i*delta)
     # delta = 0.05 is a threshold, see gwdmft.py
-    delta = DELTA
+    delta = 0.01
 
     #mu = 0.623759012177
     #mu = -0.1613936097992017 # Cu chain's HOMO
-    mu = CHEMICAL_POTENTIAL 
+    mu = -0.161393 
 
-    gate = GATE
+    gate = -0.07
 
     #nbath = 49
     # number of bath energies (not orbitals)
     # total number of bath orbitals equals nbath*nb_per_e
-    nbath = NUM_BATH_ENERGY
+    nbath = 30
 
     # base for log discretization
-    log_disc_base = LOG_DISC_BASE
+    log_disc_base = 1.5
 
-    nb_per_e = NUM_BATH_PER_ENERGY
+    nb_per_e = 1
 
     # bath energy range with respect to mu
     # the bath will be discretized within wl0+mu, wh0+mu
     # hybridization is significant between -0.3 and 0.3
     #wl0 = -0.25
     #wh0 = 0.4
-    wl0 = WL_MU
-    wh0 = WH_MU
+    wl0 = -0.15
+    wh0 = 0.45
 
     ncore = 0
     nval = 6
@@ -147,8 +147,8 @@ def dmft_abinitio():
         vno_only : bool
             Only construct virtual natural orbitals. Default is True.
     '''
-    cas = DO_CAS
-    casno = 'CASNO'
+    cas = False
+    casno = 'cc'
     composite = False
     thresh = 5e-3
     nvir_act = 11
@@ -364,7 +364,7 @@ def dmft_abinitio():
     if rank == 0:
         print ('At mu =', mydmft.mu, ', occupancy =', occupancy)
 
-    calc_occ_only = CALC_OCC_ONLY
+    calc_occ_only = False
     if calc_occ_only:
         exit()
 
@@ -402,7 +402,7 @@ def dmft_abinitio():
         gf_hf = mf_gf(mydmft._scf, freqs, eta)
 
 
-        fn = 'LDOS_FILE_NAME'
+        fn = 'ldos_gate-007_nb30_mu-0161393_log_cc_delta001_base15_nbpe1.dat'
         if rank == 0:
             f = h5py.File(fn, 'w')
             f['freqs'] = freqs
