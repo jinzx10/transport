@@ -25,6 +25,9 @@ else:
 
 print('data directory:', datadir)
 
+if not os.path.exists(datadir):
+    os.mkdir(datadir)
+
 ############################################################
 #                       basis
 ############################################################
@@ -79,7 +82,7 @@ else:
 #                       build cell
 ############################################################
 # total number of Cu atoms (left + right)
-nat_Cu = 9
+nat_Cu = 3
 assert(nat_Cu%2 == 1)
 
 # number of Cu atoms in the left/right lead
@@ -277,11 +280,11 @@ if use_reference_mol:
     C_ao_lo[:,:,:,nval_Co:nao_Co] = C_ao_iao_virt[:,:,:,0:nvirt_Co]
 
     for iat in range(nat_Cu):
-        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu:nao_Co+iat*nao_Cu+nval_Cu] 
-        = C_ao_iao_val[:,:,:,nval_Co+iat*nval_Cu:nval_Co+(iat+1):nval_Cu]
+        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu:nao_Co+iat*nao_Cu+nval_Cu] \
+                = C_ao_iao_val[:,:,:,nval_Co+iat*nval_Cu:nval_Co+(iat+1):nval_Cu]
 
-        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu+nval_Cu:nao_Co+(iat+1)*nao_Cu]
-        = C_ao_iao_virt[:,:,:,nvirt_Co+iat*nvirt_Cu:nvirt_Co+(iat+1)*nvirt_Cu]
+        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu+nval_Cu:nao_Co+(iat+1)*nao_Cu] \
+                = C_ao_iao_virt[:,:,:,nvirt_Co+iat*nvirt_Cu:nvirt_Co+(iat+1)*nvirt_Cu]
 
     C_ao_lo_Co = C_ao_lo[:,:,:,0:nao_Co]
 
