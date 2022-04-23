@@ -62,6 +62,19 @@ nao_Cu = nval_Cu + nvirt_Cu
 # if False, use HF instead
 use_pbe = False
 
+do_restricted = False
+
+if use_pbe:
+    if do_restricted:
+        method_label = 'rks'
+    else:
+        method_label = 'uks'
+else:
+    if do_restricted:
+        method_label = 'rhf'
+    else:
+        method_label = 'uhf'
+
 ############################################################
 #                       build cell
 ############################################################
@@ -73,17 +86,19 @@ assert(nat_Cu%2 == 1)
 nl = nat_Cu // 2
 nr = nat_Cu - nl
 
-cell_fname = datadir + '/cell_CoCu_' + str(nat_Cu).zfill(2) + '.chk'
+# distance between Co and the nearest Cu atoms
+l = 4.0
+r = 4.0
+    
+label = 'CoCu_' + str(nat_Cu).zfill(2) + '_l' + str(l) + '_r' + str(r)
+
+cell_fname = datadir + '/cell_' + label + '.chk'
 
 if os.path.isfile(cell_fname):
     cell = chkfile.load_cell(cell_fname)
 else:
     # atomic spacing in the lead
     a = 2.55
-    
-    # distance between Co and the nearest Cu atoms
-    l = 4
-    r = 4
     
     cell = gto.Cell()
     
@@ -119,7 +134,6 @@ Lat = lattice.Lattice(cell, kmesh)
 nao = Lat.nao
 nkpts = Lat.nkpts
 
-label = 'CoCu_' + str(nat_Cu).zfill(2) + '_' + str(kmesh[0]) + str(kmesh[1])+ str(kmesh[2])
 
 ############################################################
 #               density fitting
@@ -141,8 +155,6 @@ else:
 # if False, the scf will use newton solver to help convergence
 use_smearing = False
 smearing_sigma = 0.05
-
-do_restricted = True
 
 if do_restricted:
     if use_pbe:
@@ -253,67 +265,35 @@ else:
 ############################################################
 #               rearrange orbitals
 ############################################################
-# rearrange IAO/PAO according to their positions
+# rearrange IAO/PAO according to their indices in cell.atom
 
 if use_reference_mol:
     # C_ao_lo: transformation matrix from AO to LO (IAO) basis, all atoms, core orbitals are excluded
     # C_ao_lo_Co: transformation matrix from AO to LO (IAO) basis, only Co atom, core orbitals are excluded
-    C_ao_lo   = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=complex)
-    C_ao_lo_Co = np.zeros((spin,nkpts,nao,nval_Co+nvirt_Co), dtype=complex)
+    C_ao_lo    = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=C_ao_iao.dtype)
+    C_ao_lo_Co = np.zeros((spin,nkpts,nao,nao_Co), dtype=C_ao_lo.dtype)
     
-    # rearrange orbitals according to atomic index (Co is the first)
-    for s in range(spin):
-        # Co
-        C_ao_lo[s,:,:,0:nval_Co] = C_ao_iao_val[s,:,:,0:nval_Co]
-        C_ao_lo[s,:,:,nval_Co:nao_Co] = C_ao_iao_virt[s,:,:,0:nvirt_Co]
+    C_ao_lo[:,:,:,0:nval_Co] = C_ao_iao_val[:,:,:,0:nval_Co]
+    C_ao_lo[:,:,:,nval_Co:nao_Co] = C_ao_iao_virt[:,:,:,0:nvirt_Co]
 
-        # Cu
-        for iat in range(nat_Cu):
-            C_ao_lo[s,:,:,nao_Co]
+    for iat in range(nat_Cu):
+        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu:nao_Co+iat*nao_Cu+nval_Cu] 
+        = C_ao_iao_val[:,:,:,nval_Co+iat*nval_Cu:nval_Co+(iat+1):nval_Cu]
 
-        C_ao_lo[:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co] \
-                = C_ao_iao[:,:,ncore+nl*nval_Cu:ncore+nl*nval_Cu+nval_Co]
-        
-        # virt
-        C_ao_lo[:,:,nl*(nval_Cu+nvirt_Cu)+nval_Co:nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
-                = C_ao_iao[:,:,ncore+nval+nl*nvirt_Cu:ncore+nval+nl*nvirt_Cu+nvirt_Co]
+        C_ao_lo[:,:,:,nao_Co+iat*nao_Cu+nval_Cu:nao_Co+(iat+1)*nao_Cu]
+        = C_ao_iao_virt[:,:,:,nvirt_Co+iat*nvirt_Cu:nvirt_Co+(iat+1)*nvirt_Cu]
 
-
-        # left lead
-        for iat in range(nl):
-        
-            # val
-            C_ao_lo[:,:,iat*(nval_Cu+nvirt_Cu):iat*(nval_Cu+nvirt_Cu)+nval_Cu] \
-                    = C_ao_iao[:,:,ncore+iat*nval_Cu:ncore+(iat+1)*nval_Cu]
-        
-            # virt
-            C_ao_lo[:,:,iat*(nval_Cu+nvirt_Cu)+nval_Cu:(iat+1)*(nval_Cu+nvirt_Cu)] \
-                    = C_ao_iao[:,:,ncore+nval+iat*nvirt_Cu:ncore+nval+(iat+1)*nvirt_Cu]
-        
-        
-        
-        # right lead
-        for iat in range(nr):
-        
-            # val
-            C_ao_lo[:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co:(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu] \
-                    = C_ao_iao[:,:,ncore+nl*nval_Cu+nval_Co+iat*nval_Cu:ncore+nl*nval_Cu+nval_Co+(iat+1)*nval_Cu]
-        
-            # virt
-            C_ao_lo[:,:,(nl+iat)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co+nval_Cu:(nl+iat+1)*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co] \
-                    = C_ao_iao[:,:,ncore+nval+(nl+iat)*nvirt_Cu+nvirt_Co:ncore+nval+(nl+iat+1)*nvirt_Cu+nvirt_Co]
-        
-        C_ao_lo_Co = C_ao_lo[:,:,nl*(nval_Cu+nvirt_Cu):nl*(nval_Cu+nvirt_Cu)+nval_Co+nvirt_Co]
+    C_ao_lo_Co = C_ao_lo[:,:,:,0:nao_Co]
 
 else:
-    # TBD...
+    # TODO...
     print('rearranging orbitals not implemented!')
 
 
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = False
+plot_orb = True
 
 if plot_orb:
     plotdir = datadir + '/plot_' + label
@@ -327,71 +307,82 @@ if plot_orb:
 #           Quantities in LO (IAO) basis
 ############################################################
 S_ao_ao = kmf.get_ovlp()
+print('S_ao_ao.shape = ', S_ao_ao.shape)
 
-fname = datadir + '/C_ao_lo_' + label + '.h5'
+fname = datadir + '/C_ao_lo_' + label + '_' + method_label + '.h5'
 f = h5py.File(fname, 'w')
 f['C_ao_lo'] = C_ao_lo
 f['C_ao_lo_Co'] = C_ao_lo_Co
 f['S_ao_ao'] = S_ao_ao
 f.close()
 
-# get DFT density matrix in IAO basis
+# get density matrix in IAO basis
 DM_ao = kmf.make_rdm1() # DM_ao is real!
 
-DM_lo = np.zeros((nkpts,nval+nvirt,nval+nvirt),dtype=complex)
-DM_lo_Co = np.zeros((nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
+if len(DM_ao.shape) == 3:
+    DM_ao = DM_ao[np.newaxis,...]
 
-for ik in range(nkpts):
-    # C^\dagger*S*C=I
-    Cinv = np.dot(C_ao_lo[ik].T.conj(),S_ao_ao[ik])
-    DM_lo[ik] = np.dot(np.dot(Cinv, DM_ao[ik]), Cinv.T.conj())
+DM_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=DM_ao.dtype)
+DM_lo_Co = np.zeros((spin,nkpts,nao_Co,nao_Co),dtype=DM_ao.dtype)
 
-    Cinv_Co = np.dot(C_ao_lo_Co[ik].T.conj(),S_ao_ao[ik])
-    DM_lo_Co[ik] = np.dot(np.dot(Cinv_Co, DM_ao[ik]), Cinv_Co.T.conj())
+for s in range(spin):
+    for ik in range(nkpts):
+        # C^\dagger*S*C=I
+        Cinv = np.dot(C_ao_lo[s,ik].T.conj(),S_ao_ao[ik])
+        DM_lo[s,ik] = np.dot(np.dot(Cinv, DM_ao[s,ik]), Cinv.T.conj())
+    
+        Cinv_Co = np.dot(C_ao_lo_Co[s,ik].T.conj(),S_ao_ao[ik])
+        DM_lo_Co[s,ik] = np.dot(np.dot(Cinv_Co, DM_ao[s,ik]), Cinv_Co.T.conj())
 
-nelec_lo = np.trace(DM_lo.sum(axis=0)/nkpts)
-print ('Nelec (core excluded)', nelec_lo.real)
+for s in range(spin):
+    nelec_lo = np.trace(DM_lo[s].sum(axis=0)/nkpts)
+    print ('Nelec (core excluded)', nelec_lo.real)
+    
+    nelec_lo_Co = np.trace(DM_lo_Co[s].sum(axis=0)/nkpts)
+    print ('Nelec on Co', nelec_lo_Co.real)
 
-nelec_lo_Co = np.trace(DM_lo_Co.sum(axis=0)/nkpts)
-print ('Nelec on Co', nelec_lo_Co.real)
-
-fn = datadir + '/DM_lo_' + label + '.h5'
+fn = datadir + '/DM_lo_' + label + '_' + method_label + '.h5'
 f = h5py.File(fn, 'w')
 f['DM_lo'] = DM_lo
 f['DM_lo_Co'] = DM_lo_Co
 f.close()
 
 # get 4-index ERI
-eri_lo = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo, feri=gdf_fname)
+#eri_lo = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo, feri=gdf_fname)
 eri_lo_Co = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo_Co, feri=gdf_fname)
 
-fn = datadir + '/eri_lo_' + label + '.h5'
+fn = datadir + '/eri_lo_' + label + '_' + method_label + '.h5'
 f = h5py.File(fn, 'w')
-f['eri_lo'] = eri_lo.real
+#f['eri_lo'] = eri_lo.real
 f['eri_lo_Co'] = eri_lo_Co.real
 f.close()
 
-assert(np.max(np.abs(eri_lo.imag))<1e-8)
+assert(np.max(np.abs(eri_lo_Co.imag))<1e-8)
 
 # get one-electron integrals
 hcore_ao = kmf.get_hcore() # hcore_ao and JK_ao are all real!
+print('hcore_ao.shape = ', hcore_ao.shape)
 JK_ao = kmf.get_veff()
+if len(JK_ao.shape) == 3:
+    JK_ao = JK_ao[np.newaxis, ...]
 
-hcore_lo = np.zeros((nkpts,nval+nvirt,nval+nvirt),dtype=complex)
-hcore_lo_Co = np.zeros((nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
+hcore_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=hcore_ao.dtype)
+hcore_lo_Co = np.zeros((spin,nkpts,nao_Co    ,nao_Co    ),dtype=hcore_ao.dtype)
 
-JK_lo = np.zeros((nkpts,nval+nvirt,nval+nvirt),dtype=complex)
-JK_lo_Co = np.zeros((nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
+JK_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_ao.dtype)
+JK_lo_Co = np.zeros((spin,nkpts,nao_Co    ,nao_Co    ),dtype=JK_ao.dtype)
 
-for ik in range(nkpts):
-    hcore_lo[ik] = np.dot(np.dot(C_ao_lo[ik].T.conj(), hcore_ao[ik]), C_ao_lo[ik])
-    hcore_lo_Co[ik] = np.dot(np.dot(C_ao_lo_Co[ik].T.conj(), hcore_ao[ik]), C_ao_lo_Co[ik])
+for s in range(spin):
+    for ik in range(nkpts):
+        hcore_lo[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), hcore_ao[ik]), C_ao_lo[s,ik])
+        hcore_lo_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), hcore_ao[ik]), C_ao_lo_Co[s,ik])
+    
+        JK_lo[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo[s,ik])
+        JK_lo_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo_Co[s,ik])
 
-    JK_lo[ik] = np.dot(np.dot(C_ao_lo[ik].T.conj(), JK_ao[ik]), C_ao_lo[ik])
-    JK_lo_Co[ik] = np.dot(np.dot(C_ao_lo_Co[ik].T.conj(), JK_ao[ik]), C_ao_lo_Co[ik])
 
+fn = datadir + '/hcore_JK_lo_' + label + '_' + method_label + '.h5'
 
-fn = datadir + '/hcore_JK_lo_dft_' + label + '.h5'
 f = h5py.File(fn, 'w')
 f['hcore_lo'] = hcore_lo
 f['hcore_lo_Co'] = hcore_lo_Co
@@ -399,27 +390,31 @@ f['JK_lo'] = JK_lo
 f['JK_lo_Co'] = JK_lo_Co
 f.close()
 
-assert(np.max(np.abs(hcore_lo.sum(axis=0).imag/nkpts))<1e-8)
-assert(np.max(np.abs(JK_lo.sum(axis=0).imag/nkpts))<1e-8)
-
-# get HF JK term using DFT density
-kmf_hf = scf.KRHF(cell, kpts, exxdiv='ewald')
-kmf_hf.with_df = gdf
-kmf_hf.with_df._cderi = gdf_fname
-kmf_hf.max_cycle = 0
-JK_ao = kmf_hf.get_veff(dm_kpts=DM_ao)
-
-JK_lo = np.zeros((nkpts,nval+nvirt,nval+nvirt),dtype=complex)
-JK_lo_Co = np.zeros((nkpts,nval_Co+nvirt_Co,nval_Co+nvirt_Co),dtype=complex)
-for ik in range(nkpts):
-    JK_lo[ik] = np.dot(np.dot(C_ao_lo[ik].T.conj(), JK_ao[ik]), C_ao_lo[ik])
-    JK_lo_Co[ik] = np.dot(np.dot(C_ao_lo_Co[ik].T.conj(), JK_ao[ik]), C_ao_lo_Co[ik])
-
-# HF only differs from DFT by the JK part
-fn = datadir + '/JK_lo_hf_' + label + '.h5'
-f = h5py.File(fn, 'w')
-f['JK_lo'] = JK_lo
-f['JK_lo_Co'] = JK_lo_Co
-f.close()
+# if using DFT, get HF JK term using DFT density
+if use_pbe:
+    if do_restricted:
+        kmf_hf = scf.KRHF(cell, kpts, exxdiv='ewald')
+    else:
+        kmf_hf = scf.KUHF(cell, kpts, exxdiv='ewald')
+    kmf_hf.with_df = gdf
+    kmf_hf.with_df._cderi = gdf_fname
+    kmf_hf.max_cycle = 0
+    if do_restricted:
+        JK_ao_hf = kmf_hf.get_veff(dm_kpts=DM_ao[0])
+    else:
+        JK_ao_hf = kmf_hf.get_veff(dm_kpts=DM_ao)
+    
+    JK_lo_hf    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_lo.dtype)
+    JK_lo_hf_Co = np.zeros((spin,nkpts,nao_Co,nao_Co),dtype=JK_lo.dtype)
+    for s in range(spin):
+        for ik in range(nkpts):
+            JK_lo_hf[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), JK_ao_hf[s,ik]), C_ao_lo[s,ik])
+            JK_lo_hf_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), JK_ao_hf[s,ik]), C_ao_lo_Co[s,ik])
+    
+    fn = datadir + '/hcore_JK_lo_' + label + '_' + method_label + '.h5'
+    f = h5py.File(fn, 'w')
+    f['JK_lo_hf'] = JK_lo_hf
+    f['JK_lo_hf_Co'] = JK_lo_hf_Co
+    f.close()
 
 
