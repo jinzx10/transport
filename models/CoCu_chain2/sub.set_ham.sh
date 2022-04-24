@@ -21,9 +21,37 @@ datadir=${dir}/Co_svp_Cu_svp_bracket
 cd ${dir}
 mkdir -p ${datadir}
 
-gate=0.05
-output=CoCu_set_ham_gate${gate}.out
+#-----------------------------------
+use_pbe=True
+do_restricted=True
+left=3.6
+right=3.6
+gate=0
 
-sed "s/GATE/${gate}/" ${dir}/CoCu_set_ham.py > ${dir}/CoCu_set_ham_gate${gate}.py
+if [[ ${do_restricted} == "True" ]]; then
+    method=r
+else
+    method=u
+fi
 
-python ${dir}/CoCu_set_ham_gate${gate}.py --datadir=${datadir} > ${datadir}/${output}
+if [[ ${use_pbe} == "True" ]]; then
+    method=${method}ks
+else
+    method=${method}hf
+fi
+
+suffix=l${left}_r${right}_${method}_gate${gate}
+
+script=CoCu_set_ham_${suffix}.py
+output=CoCu_set_ham_${suffix}.out
+
+sed -e"s/GATE/${gate}/" \
+    -e"s/DO_RESTRICTED/${do_restricted}/" \
+    -e"s/USE_PBE/${use_pbe}/" \
+    -e"s/LEFT/${left}/" \
+    -e"s/RIGHT/${right}/" \
+    CoCu_set_ham.py > ${script}
+
+python ${script} --datadir=${datadir} > ${output}
+
+

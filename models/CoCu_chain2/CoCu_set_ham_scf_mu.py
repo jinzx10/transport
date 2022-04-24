@@ -8,6 +8,8 @@ from libdmet.utils import plot
 from pyscf.pbc import gto, df, scf
 from pyscf.pbc.lib import chkfile
 
+from fcdmft.solver import scf_mu
+
 from libdmet_solid.lo.iao import reference_mol
 
 gate = GATE
@@ -95,10 +97,7 @@ nr = nat_Cu - nl
 l = LEFT
 r = RIGHT
 
-# Cu atomic spacing in the lead
-a = 2.55
-
-cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
+cell_label = 'CoCu_' + str(nat_Cu).zfill(2) + '_l' + str(l) + '_r' + str(r)
 gate_label = 'gate' + str(gate)
 
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
@@ -106,6 +105,8 @@ cell_fname = datadir + '/cell_' + cell_label + '.chk'
 if os.path.isfile(cell_fname):
     cell = chkfile.load_cell(cell_fname)
 else:
+    # atomic spacing in the lead
+    a = 2.55
     
     cell = gto.Cell()
     
@@ -182,7 +183,6 @@ kmf.with_df = gdf
 if use_smearing:
     kmf = scf.addons.smearing_(kmf, sigma = smearing_sigma, method = 'fermi')
 else:
-    # newton or diis?
     kmf = kmf.newton()
 
 if os.path.isfile(mf_fname):
@@ -321,8 +321,8 @@ if plot_orb:
     if not os.path.exists(plotdir):
         os.mkdir(plotdir)
 
-    plot.plot_orb_k_all(cell, plotdir + '/iao_', C_ao_iao, kpts, margin=0.0)
-    plot.plot_orb_k_all(cell, plotdir + '/lo_', C_ao_lo, kpts, margin=0.0)
+    plot.plot_orb_k_all(cell, plotdir + '/iao_' + str(nat_Cu).zfill(2), C_ao_iao, kpts, margin=0.0)
+    plot.plot_orb_k_all(cell, plotdir + '/lo_' + str(nat_Cu).zfill(2), C_ao_lo, kpts, margin=0.0)
 
 ############################################################
 #           Quantities in LO (IAO) basis

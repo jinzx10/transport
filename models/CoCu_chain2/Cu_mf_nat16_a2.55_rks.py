@@ -49,7 +49,7 @@ if not os.path.exists(datadir):
 # will use HF anyway.
 
 # if False, use HF instead
-use_pbe = USE_PBE
+use_pbe = True
 
 if use_pbe:
     method_label = 'rks'
@@ -60,14 +60,14 @@ else:
 #                   build cell
 ############################################################
 # total number of Cu atoms
-nat = NAT
+nat = 16
 assert(nat%2 == 0)
 
 
 # atomic spacing
-a = SPACING
+a = 2.55
 
-cell_label = 'Cu_' + 'nat' + str(nat) + '_a' + str(a)
+cell_label = 'Cu_' + 'nat' + str(nat).zfill(2) + '_a' + str(a)
 
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 
@@ -133,7 +133,7 @@ if use_pbe:
 else:
     kmf = scf.KRHF(cell, kpts).density_fit()
 
-mf_fname = datadir + '/' + cell_label + '_' + method_label + '.chk'
+mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + '.chk'
 
 kmf.with_df = gdf
 
@@ -239,8 +239,8 @@ if plot_orb:
     if not os.path.exists(plotdir):
         os.mkdir(plotdir)
 
-    plot.plot_orb_k_all(cell, plotdir + '/iao_', C_ao_iao, kpts, margin=0.0)
-    plot.plot_orb_k_all(cell, plotdir + '/lo_', C_ao_lo, kpts, margin=0.0)
+    plot.plot_orb_k_all(cell, plotdir + '/iao_' + str(nat).zfill(2), C_ao_iao, kpts, margin=0.0)
+    plot.plot_orb_k_all(cell, plotdir + '/lo_' + str(nat).zfill(2), C_ao_lo, kpts, margin=0.0)
 
 ############################################################
 #           Quantities in LO (IAO) basis
@@ -261,7 +261,5 @@ fh = h5py.File(fn, 'w')
 fh['hcore_lo'] = hcore_lo
 fh['JK_lo'] = JK_lo
 fh.close()
-
-print('finished')
 
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --output=slurm.out
-#SBATCH --partition=serial,parallel,smallmem
+#SBATCH --partition=parallel
 ##SBATCH --partition=smallmem
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
@@ -10,19 +10,37 @@
 #SBATCH --mem=100G
 #SBATCH --job-name=Cu_mf
 
-export MKL_NUM_THREADS=28
-export OMP_NUM_THREADS=28
-
 source $HOME/.bashrc
 conda activate
 
-dir=$HOME/projects/transport/models/CoCu_chain
-datadir=${dir}/Cu_svp_bracket_pbe_v2
+export MKL_NUM_THREADS=28
+export OMP_NUM_THREADS=28
+
+dir=$HOME/projects/transport/models/CoCu_chain2
+datadir=${dir}/Cu_def2-svp-bracket/
 
 cd ${dir}
 mkdir -p ${datadir}
 
-timestamp=`date +%y%m%d-%H%M%S`
-output="Cu_mf_${timestamp}.out"
+#-----------------------------------
+use_pbe=True
+nat=8
+spacing=2.55
 
-python ${dir}/Cu_mf_v2.py --datadir=${datadir} > ${datadir}/${output}
+if [[ ${use_pbe} == "True" ]]; then
+    method=rks
+else
+    method=rhf
+fi
+
+suffix=nat${nat}_a${spacing}_${method}
+
+script=Cu_mf_${suffix}.py
+output=Cu_mf_${suffix}.out
+
+sed -e"s/USE_PBE/${use_pbe}/" \
+    -e"s/NAT/${nat}/" \
+    -e"s/SPACING/${spacing}/" \
+    Cu_mf.py > ${script}
+
+python ${script} --datadir=${datadir} > ${output}

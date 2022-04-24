@@ -19,26 +19,28 @@ datadir=${dir}/Co_svp_Cu_svp_bracket
 cd ${dir}
 mkdir -p ${datadir}
 
+#-----------------------------------
+use_pbe=False
+do_restricted=True
+left=3.6
+right=3.6
+
 gate_list=(`seq -0.050 0.002 0.050`)
 gate=${gate_list[${SLURM_ARRAY_TASK_ID}]}
 
-use_pbe=True
-do_restricted=True
-
 if [[ ${do_restricted} == "True" ]]; then
-    suffix=r
+    method=r
 else
-    suffix=u
+    method=u
 fi
 
 if [[ ${use_pbe} == "True" ]]; then
-    suffix=${suffix}ks
+    method=${method}ks
 else
-    suffix=${suffix}hf
+    method=${method}hf
 fi
 
-suffix=${suffix}_gate${gate}
-
+suffix=l${left}_r${right}_${method}_gate${gate}
 
 script=CoCu_set_ham_${suffix}.py
 output=CoCu_set_ham_${suffix}.out
@@ -46,6 +48,8 @@ output=CoCu_set_ham_${suffix}.out
 sed -e"s/GATE/${gate}/" \
     -e"s/DO_RESTRICTED/${do_restricted}/" \
     -e"s/USE_PBE/${use_pbe}/" \
+    -e"s/LEFT/${left}/" \
+    -e"s/RIGHT/${right}/" \
     CoCu_set_ham.py > ${script}
 
 
