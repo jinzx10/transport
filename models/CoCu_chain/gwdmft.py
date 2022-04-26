@@ -61,6 +61,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     H00 = dmft.H00
     H01 = dmft.H01
     log_disc_base = dmft.log_disc_base
+    eri_scale = dmft.eri_scale
 
 
     # DFT veff and supercell Hamiltonian
@@ -91,6 +92,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
     # ZJ: 
     if rank == 0:
         print('log_disc_base = ', log_disc_base)
+        print('eri_scale = ', eri_scale)
 
     '''
     ZJ: below the code is going to construct a bath from the hyb
@@ -397,6 +399,10 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
         # construct embedding Hamiltonian
         himp, eri_imp = imp_ham(himp_cell, eris, bath_v, bath_e, ncore)
 
+        #<=============================
+        eri_imp *= eri_scale
+        #=============================>
+
         # get initial guess of impurity 1-RDM
         nimp = himp.shape[1]
         dm0 = np.zeros((spin,nimp,nimp))
@@ -427,7 +433,7 @@ def kernel(dmft, mu, wl=None, wh=None, occupancy=None, delta=None,
             if not opt_mu:
                 # run HF for embedding problem
                 mf = mf_kernel(himp, eri_imp, mu, nao, dm0,
-                                  max_mem=dmft.max_memory, verbose=dmft.verbose, JK00=dmft.JK_00)
+                                  max_mem=dmft.max_memory, verbose=dmft.verbose)
                 dmft._scf = mf
         else:
             # Get mean-field determinant by diagonalizing imp+bath Ham just once
@@ -635,7 +641,7 @@ def mu_fit(dmft, mu0, occupancy, himp, eri_imp, dm0, step=0.02, trust_region=0.0
         # run HF for embedding problem
         mu = mu0 + dmu
         dmft._scf = mf_kernel(himp, eri_imp, mu, dmft.nao, dm0,
-                              max_mem=dmft.max_memory, verbose=4, JK00=dmft.JK_00)
+                              max_mem=dmft.max_memory, verbose=4)
         # run ground-state impurity solver to get 1-rdm
         rdm = dmft.get_rdm_imp()
         nelec = np.trace(rdm)
@@ -1099,7 +1105,7 @@ class DMFT(lib.StreamObject):
 
     def __init__(self, hcore_k, JK_k, DM_k, eris, nval, ncore, nfrz,
                  nbath, nb_per_e, disc_type='opt', solver_type='cc',
-                 H00=None, H01=None, log_disc_base=1.5):
+                 H00=None, H01=None, log_disc_base=1.5, eri_scale=1.0):
         # account for both spin-restricted and spin-unrestricted cases
         if len(hcore_k.shape) == 3:
             hcore_k = hcore_k[np.newaxis, ...]
@@ -1147,6 +1153,7 @@ class DMFT(lib.StreamObject):
         self.H00 = H00
         self.H01 = H01
         self.log_disc_base=log_disc_base
+        self.eri_scale = eri_scale
         #================================>
 
         # CAS specific parameters

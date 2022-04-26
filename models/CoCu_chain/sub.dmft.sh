@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#SBATCH --output=slurm.dmft50.out
 #SBATCH --partition=serial
 #SBATCH --nodes=1
 #SBATCH --time=120:00:00
@@ -26,36 +25,43 @@ solver=cc
 delta=0.01
 base=1.5 # base for log discretization
 nbpe=1
+do_cas=False
 casno=cc
-gate=-0.07
+gate=0
 wl0=-0.15
 wh0=0.45
+eri_scale=1.0
 calc_occ_only=False
 
-suffix=gate${gate//.}_nb${nb}_mu${mu//.}_${disc}_${solver}_delta${delta//.}_base${base//.}_nbpe${nbpe}
+method=${solver}
+if [[ ${do_cas} == "True" ]]; then
+    method=${method}_casno${casno}
+fi
+
+suffix=gate${gate}_eri${eri_scale}_nb${nb}_mu${mu}_${disc}_${method}_delta${delta}_base${base}_nbpe${nbpe}
 
 sed -e"s/CHEMICAL_POTENTIAL/${mu}/" \
     -e"s/NUM_BATH_ENERGY/${nb}/" \
     -e"s/DISC_TYPE/${disc}/" \
     -e"s/SOLVER_TYPE/${solver}/" \
     -e"s/DELTA/${delta}/" \
+    -e"s/LDOS_FILE_NAME/ldos_${suffix}.dat/" \
     -e"s/LOG_DISC_BASE/${base}/" \
     -e"s/NUM_BATH_PER_ENERGY/${nbpe}/" \
-    -e"s/LDOS_FILE_NAME/ldos_${suffix}.dat/" \
     -e"s/GATE/${gate}/" \
     -e"s/WL_MU/${wl0}/" \
     -e"s/WH_MU/${wh0}/" \
     -e"s/CALC_OCC_ONLY/${calc_occ_only}/" \
+    -e"s/ERI_SCALE/${eri_scale}/" \
+    -e"s/DO_CAS/${do_cas}/" \
+    -e"s/CASNO/${casno}/" \
     run_dmft.py > run_dmft_${suffix}.py
-
-if [[ ${solver} == "dmrg" ]]; then
-    module unload mpich
-    module load openmpi
-    sed -i -e"s/DO_CAS/True/"  -e"s/CASNO/${casno}/" run_dmft_${suffix}.py
-else
-    sed -i -e"s/DO_CAS/False/"  -e"s/CASNO/${casno}/" run_dmft_${suffix}.py
-fi
 
 mpirun -np 4 python run_dmft_${suffix}.py  > run_dmft_${suffix}.out
 #python run_dmft_${suffix}.py  > run_dmft_${suffix}.out
 
+echo ${suffix}
+
+echo "wl0 = " ${wl0}
+echo "wh0 = " ${wh0}
+echo "calc_occ_only = " ${calc_occ_only}

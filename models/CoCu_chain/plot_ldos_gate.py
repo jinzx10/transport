@@ -40,22 +40,29 @@ def plot_ldos(gate, nb, method, linestyle, color, cumsum = False):
 
 #plot_ldos(-0.02, 25, 'cc', '-', 'g')
 #plot_ldos(-0.02, 25, 'hf', ':', 'g')
-
+#
 #plot_ldos(-0.04, 25, 'cc', '-', 'b')
 #plot_ldos(-0.04, 25, 'hf', ':', 'b')
-
+#
 #plot_ldos(-0.06, 25, 'cc', '-', 'c')
 #plot_ldos(-0.06, 25, 'hf', ':', 'c')
-
+#
 #plot_ldos(-0.08, 25, 'cc', '-', 'm')
 #plot_ldos(-0.08, 25, 'hf', ':', 'm')
-
+#
 #plot_ldos(-0.1, 25, 'cc', '-', 'y')
 #plot_ldos(-0.1, 25, 'hf', ':', 'y')
 
+#plot_ldos(0.09, 30, 'cc', '-', 'm')
+#plot_ldos(0.09, 30, 'hf', ':', 'm')
+
 plot_ldos(-0.07, 30, 'cc', '-', 'm')
 plot_ldos(-0.07, 30, 'hf', ':', 'm')
-
+#plot_ldos(-0.09, 30, 'cc', '-', 'm')
+#plot_ldos(-0.09, 30, 'hf', ':', 'm')
+#
+#plot_ldos(-0.07, 30, 'cc', '-', 'm')
+#plot_ldos(-0.07, 30, 'hf', ':', 'm')
 plt.axvline(x=mu, linestyle=':', color='black', lw=1)
 
 #plot_ldos(-0.04, 25, 'cc', '-', 'k', True)

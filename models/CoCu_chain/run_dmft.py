@@ -96,8 +96,6 @@ def dmft_abinitio():
     # bath energy range with respect to mu
     # the bath will be discretized within wl0+mu, wh0+mu
     # hybridization is significant between -0.3 and 0.3
-    #wl0 = -0.25
-    #wh0 = 0.4
     wl0 = WL_MU
     wh0 = WH_MU
 
@@ -259,6 +257,12 @@ def dmft_abinitio():
     fn = datadir + '/eri_lo_' + label + '.h5'
     feri = h5py.File(fn, 'r')
     eri = np.asarray(feri['eri_lo_ncCo'])
+
+    #<==========================================
+    #ZJ: FIXME
+    # artificially scale the e-e interaction!
+    eri_scale = ERI_SCALE
+    #==========================================>
     feri.close()
     eri_new = eri
     if eri_new.shape[0] == 3:
@@ -293,7 +297,7 @@ def dmft_abinitio():
     # run self-consistent DMFT
     mydmft = gwdmft.DMFT(hcore_k, JK_k, DM_k, eri_new, nval, ncore, nfrz, nbath,
                        nb_per_e, disc_type=disc_type, solver_type=solver_type, 
-                       H00=H00, H01=H01, log_disc_base=log_disc_base)
+                       H00=H00, H01=H01, log_disc_base=log_disc_base, eri_scale=eri_scale)
     mydmft.gw_dmft = gw_dmft
     mydmft.verbose = 5
     mydmft.diis = True
@@ -393,7 +397,13 @@ def dmft_abinitio():
             extra_delta = None
 
         # ZJ: freqs on which ldos is computed
-        freqs = np.linspace(mydmft.mu-0.005, mydmft.mu+0.005, 200)
+        #freqs_wide = np.linspace(mydmft.mu-0.05, mydmft.mu+0.05, 100)
+        #freqs_fine = np.linspace(mydmft.mu-0.005, mydmft.mu+0.005, 100)
+        #freqs = np.concatenate((freqs_wide,freqs_fine))
+        #freqs = np.sort(freqs)
+
+        freqs = np.linspace(mydmft.mu-0.05, mydmft.mu+0.05, 100)
+
 
         #<====================================================
         # ZJ: get impurity DOS

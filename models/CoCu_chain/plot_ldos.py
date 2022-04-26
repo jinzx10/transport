@@ -2,143 +2,58 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-'''
-#==========================================================================
-fh = h5py.File('ldos-17-log-cc.dat', 'r')
+mu = -0.161393
 
-freqs = fh['freqs']
-nw = len(freqs)
+def plot_ldos(gate, nb, method, eri_scale, linestyle, color, cumsum = False):
+    # get the occupancy
+    suffix = 'gate' + str(gate) + '_eri' + str(eri_scale) + '_nb' + str(nb) + '_mu' + str(mu) + '_log_cc_delta0.01_base1.5_nbpe1'
+    outfile='run_dmft_' + suffix + '.out'
+    with open(outfile, 'r') as f:
+        for line in f.readlines():
+            if 'At mu' in line:
+                occ = line.split()[7][:4]
+                break
 
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
+    fname = 'ldos_' + suffix + '.dat'
+    fh = h5py.File(fname, 'r')
+    
+    freqs = fh['freqs']
+    nw = len(freqs)
+    
+    ldos = np.zeros((5, nw))
+    
+    for i in range(5):
+        ldos[i,:] = fh['ldos_' + method + '_'+str(i+1)]
+    
+    #ldos = np.zeros((6, nw))
+    #
+    #for i in range(6):
+    #    ldos[i,:] = fh['ldos_' + method + '_'+str(i)]
+    
+    ldos = np.sum(ldos, axis=0)
 
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
+    
+    label = method + '   nbath=' + str(nb) + '   gate=' + str(gate)
+    if method == 'cc':
+        label = label + '   Nelec=' + occ
 
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls=':', color='b')
-plt.plot(freqs, ldos_cc_sum, ls=':', color='r')
-'''
-
-#==========================================================================
-fh = h5py.File('ldos_gate-0062_nb25_mu-0161393_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls=':', color='b')
-plt.plot(freqs, ldos_cc_sum, ls=':', color='r')
-#==========================================================================
-fh = h5py.File('ldos_gate-0062_nb35_mu-0161393_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls='--', color='b')
-plt.plot(freqs, ldos_cc_sum, ls='--', color='r')
-'''
-
-#==========================================================================
-fh = h5py.File('ldos_nb25_mu-00775_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls=':', color='b')
-plt.plot(freqs, ldos_cc_sum, ls=':', color='r')
-
-#==========================================================================
-fh = h5py.File('ldos_nb35_mu-00775_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls='--', color='b')
-plt.plot(freqs, ldos_cc_sum, ls='--', color='r')
-
-#==========================================================================
-fh = h5py.File('ldos_nb50_mu-00775_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, ls='-', color='b')
-plt.plot(freqs, ldos_cc_sum, ls='-', color='r')
-
-#==========================================================================
-fh = h5py.File('ldos_nb70_mu-00775_log_cc_delta001_base15_nbpe1.dat', 'r')
-
-freqs = fh['freqs']
-nw = len(freqs)
-
-ldos_hf = np.zeros((6, nw))
-ldos_cc = np.zeros((6, nw))
-
-for i in range(6):
-    ldos_hf[i,:] = fh['ldos_hf_'+str(i)]
-    ldos_cc[i,:] = fh['ldos_cc_'+str(i)]
-
-ldos_hf_sum = np.sum(ldos_hf, axis=0)
-ldos_cc_sum = np.sum(ldos_cc, axis=0)
-
-plt.plot(freqs, ldos_hf_sum, marker='o', color='b')
-plt.plot(freqs, ldos_cc_sum, marker='o', color='r')
-'''
+    if cumsum == False:
+        plt.plot(freqs, ldos, ls=linestyle, color=color, label=label)
+    else:
+        plt.plot(freqs, np.cumsum(ldos)*(freqs[1]-freqs[0]), ls=linestyle, color=color, label=label)
 
 
+#plot_ldos(-0.07, 30, 'cc', 0.0, '-', 'g')
+#plot_ldos(-0.07, 30, 'hf', 0.0, ':', 'g')
+#plot_ldos(-0.07, 30, 'cc', 0.5, '-', 'b')
+#plot_ldos(-0.07, 30, 'hf', 0.5, ':', 'b')
+plot_ldos(-0.07, 30, 'cc', 1.0, '-', 'r')
+plot_ldos(-0.07, 30, 'hf', 1.0, ':', 'r')
 
-
+plt.legend()
+plt.xlabel('E')
+#plt.ylabel('LDoS')
+#plt.title('Total LDoS on Co')
 plt.show()
+
+

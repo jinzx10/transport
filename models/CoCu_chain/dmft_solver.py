@@ -27,7 +27,7 @@ except:
 Impurity solver interfaces for DMFT calculation
 '''
 
-def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE, JK00=None):
+def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE):
     '''
     HF calculation with fixed chemical potential and fluctuating occupancy
 
@@ -126,13 +126,13 @@ def mf_kernel(himp, eri_imp, mu, nao, dm0, max_mem, verbose=logger.NOTE, JK00=No
     mf.mo_energy = mo_energy
     mf.mo_occ = mo_occ
     #<========================================
-    mf.nimp = nao
-    mf.dm_init = mf.make_rdm1()
-    JK_impbath = scf._get_veff(mf.dm_init, eri_imp)
-    mf.JK = JK_impbath[0]
-    JK_hf = JK_impbath.copy()
-    JK_hf[:,:nao,:nao] = JK00[:,:nao,:nao]
-    mf.JK_hf = JK_hf[0]
+    #mf.nimp = nao
+    #mf.dm_init = mf.make_rdm1()
+    #JK_impbath = scf._get_veff(mf.dm_init, eri_imp)
+    #mf.JK = JK_impbath[0]
+    #JK_hf = JK_impbath.copy()
+    #JK_hf[:,:nao,:nao] = JK00[:,:nao,:nao]
+    #mf.JK_hf = JK_hf[0]
     #========================================>
     comm.Barrier()
 
@@ -981,7 +981,7 @@ def cc_rdm(mf, ao_orbs=None, cas=False, casno='gw', composite=False,
                                ip_cut=ip_cut, ea_no=ea_no, ip_no=ip_no, vno_only=vno_only)
         elif casno == 'cc':
             assert(not composite)
-            mf_cas, no_coeff, gf_low, gf_low_cas, dm_low, dm_low_cas = \
+            mf_cas, no_coeff, gf_low, gf_low_cas, dm_low, dm_low_cas, fock_cas = \
                         cas_ccsd(mf, freqs, delta, nimp, composite=composite, thresh=thresh,
                                nvir_act=nvir_act, nocc_act=nocc_act, ea_cut=ea_cut,
                                ip_cut=ip_cut, ea_no=ea_no, ip_no=ip_no, vno_only=vno_only)
