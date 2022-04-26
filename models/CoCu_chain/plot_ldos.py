@@ -2,11 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-mu = -0.161393
-
 def plot_ldos(gate, nb, method, eri_scale, linestyle, color, cumsum = False):
     # get the occupancy
-    suffix = 'gate' + str(gate) + '_eri' + str(eri_scale) + '_nb' + str(nb) + '_mu' + str(mu) + '_log_cc_delta0.01_base1.5_nbpe1'
+    suffix = 'gate' + str(gate) + '_eri' + str(eri_scale) + '_nb' + str(nb) + '_mu' + str(mu) + '_log_cc_delta0.01_eta0.1_base1.5_nbpe1'
     outfile='run_dmft_' + suffix + '.out'
     with open(outfile, 'r') as f:
         for line in f.readlines():
@@ -20,15 +18,15 @@ def plot_ldos(gate, nb, method, eri_scale, linestyle, color, cumsum = False):
     freqs = fh['freqs']
     nw = len(freqs)
     
-    ldos = np.zeros((5, nw))
-    
-    for i in range(5):
-        ldos[i,:] = fh['ldos_' + method + '_'+str(i+1)]
-    
-    #ldos = np.zeros((6, nw))
+    #ldos = np.zeros((5, nw))
     #
-    #for i in range(6):
-    #    ldos[i,:] = fh['ldos_' + method + '_'+str(i)]
+    #for i in range(5):
+    #    ldos[i,:] = fh['ldos_' + method + '_'+str(i+1)]
+    
+    ldos = np.zeros((6, nw))
+    
+    for i in range(6):
+        ldos[i,:] = fh['ldos_' + method + '_'+str(i)]
     
     ldos = np.sum(ldos, axis=0)
 
@@ -43,12 +41,13 @@ def plot_ldos(gate, nb, method, eri_scale, linestyle, color, cumsum = False):
         plt.plot(freqs, np.cumsum(ldos)*(freqs[1]-freqs[0]), ls=linestyle, color=color, label=label)
 
 
-#plot_ldos(-0.07, 30, 'cc', 0.0, '-', 'g')
-#plot_ldos(-0.07, 30, 'hf', 0.0, ':', 'g')
-#plot_ldos(-0.07, 30, 'cc', 0.5, '-', 'b')
-#plot_ldos(-0.07, 30, 'hf', 0.5, ':', 'b')
-plot_ldos(-0.07, 30, 'cc', 1.0, '-', 'r')
-plot_ldos(-0.07, 30, 'hf', 1.0, ':', 'r')
+# 
+mu = -0.161393
+
+
+
+#plot_ldos(0, 30, 'cc', 1.0, '-', 'r')
+plot_ldos(0, 30, 'hf', 1.0, ':', 'r')
 
 plt.legend()
 plt.xlabel('E')

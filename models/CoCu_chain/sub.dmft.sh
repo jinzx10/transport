@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=7
 ##SBATCH --mem=120G
-#SBATCH --job-name=run_dmft_50_cc
+#SBATCH --job-name=run_dmft_cc
 #SBATCH --exclude=pauling001
 
 source $HOME/.bashrc
@@ -22,7 +22,7 @@ nb=30 # number of bath ENERGIES
 mu=-0.161393
 disc=log
 solver=cc
-delta=0.01
+delta=0.01 # in units of Ha
 base=1.5 # base for log discretization
 nbpe=1
 do_cas=False
@@ -32,25 +32,33 @@ wl0=-0.15
 wh0=0.45
 eri_scale=1.0
 calc_occ_only=False
+eta=0.1 # in units of eV
+ldos_wl=-0.05
+ldos_wh=0.05
+ldos_nw=100
 
 method=${solver}
 if [[ ${do_cas} == "True" ]]; then
     method=${method}_casno${casno}
 fi
 
-suffix=gate${gate}_eri${eri_scale}_nb${nb}_mu${mu}_${disc}_${method}_delta${delta}_base${base}_nbpe${nbpe}
+suffix=gate${gate}_eri${eri_scale}_nb${nb}_mu${mu}_${disc}_${method}_delta${delta}_eta${eta}_base${base}_nbpe${nbpe}
 
 sed -e"s/CHEMICAL_POTENTIAL/${mu}/" \
     -e"s/NUM_BATH_ENERGY/${nb}/" \
     -e"s/DISC_TYPE/${disc}/" \
     -e"s/SOLVER_TYPE/${solver}/" \
     -e"s/DELTA/${delta}/" \
+    -e"s/ETA/${eta}/" \
     -e"s/LDOS_FILE_NAME/ldos_${suffix}.dat/" \
     -e"s/LOG_DISC_BASE/${base}/" \
     -e"s/NUM_BATH_PER_ENERGY/${nbpe}/" \
     -e"s/GATE/${gate}/" \
     -e"s/WL_MU/${wl0}/" \
     -e"s/WH_MU/${wh0}/" \
+    -e"s/LDOS_WL/${ldos_wl}/" \
+    -e"s/LDOS_WH/${ldos_wh}/" \
+    -e"s/LDOS_NW/${ldos_nw}/" \
     -e"s/CALC_OCC_ONLY/${calc_occ_only}/" \
     -e"s/ERI_SCALE/${eri_scale}/" \
     -e"s/DO_CAS/${do_cas}/" \
@@ -64,4 +72,9 @@ echo ${suffix}
 
 echo "wl0 = " ${wl0}
 echo "wh0 = " ${wh0}
+echo "ldos_wl = " ${ldos_wl}
+echo "ldos_wh = " ${ldos_wh}
+echo "ldos_nw = " ${ldos_nw}
 echo "calc_occ_only = " ${calc_occ_only}
+
+

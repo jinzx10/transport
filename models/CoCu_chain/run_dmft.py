@@ -118,7 +118,7 @@ def dmft_abinitio():
     Ha2eV = 27.211386
     wl = 16.2/Ha2eV
     wh = 17.6/Ha2eV
-    eta = 0.005/Ha2eV
+    eta = ETA/Ha2eV
     gmres_tol = 1e-3
 
     '''
@@ -207,6 +207,10 @@ def dmft_abinitio():
     nao_Co = hcore_k.shape[2]
     hcore_k[0,0] = hcore_k[0,0] + gate*np.eye(nao_Co)
     hcore_full[0,0,:nao_Co,:nao_Co] = hcore_full[0,0,:nao_Co,:nao_Co] + gate*np.eye(nao_Co)
+    if rank == 0:
+        print('hcore_k.shape', hcore_k.shape)
+        print('hcore_full.shape', hcore_full.shape)
+        print('nao_Co = ', nao_Co)
     #===============================>
 
     # read imp HF-JK matrix
@@ -363,10 +367,11 @@ def dmft_abinitio():
     mydmft.save_mf = save_mf
 
     mydmft.kernel(mu0=mu, wl=wl0, wh=wh0, delta=delta, occupancy=nelectron, opt_mu=opt_mu)
-    occupancy = 0.
-    occupancy = np.trace(mydmft.get_rdm_imp())
-    if rank == 0:
-        print ('At mu =', mydmft.mu, ', occupancy =', occupancy)
+
+    if solver_type is not 'hf':
+        occupancy = np.trace(mydmft.get_rdm_imp())
+        if rank == 0:
+            print ('At mu =', mydmft.mu, ', occupancy =', occupancy)
 
     calc_occ_only = CALC_OCC_ONLY
     if calc_occ_only:
@@ -402,7 +407,11 @@ def dmft_abinitio():
         #freqs = np.concatenate((freqs_wide,freqs_fine))
         #freqs = np.sort(freqs)
 
-        freqs = np.linspace(mydmft.mu-0.05, mydmft.mu+0.05, 100)
+        ldos_wl = LDOS_WL
+        ldos_wh = LDOS_WH
+        ldos_nw = LDOS_NW
+
+        freqs = np.linspace(mydmft.mu+ldos_wl, mydmft.mu+ldos_wh, LDOS_NW)
 
 
         #<====================================================
@@ -419,14 +428,17 @@ def dmft_abinitio():
             # first 6 are valence
             for i in range(6):
                 f['ldos_hf_'+str(i)] = -1./np.pi*(gf_hf[0,i,i,:].imag)
+            f.close()
 
-        gf = mydmft.get_gf_imp(freqs, eta, ao_orbs=range(6), 
+        gf = mydmft.get_gf_imp(freqs, eta, ao_orbs=range(6), \
                 extra_freqs=None, extra_delta=None, use_gw=False)
 
         if rank == 0:
-            for i in range(6):
-                f['ldos_cc_'+str(i)] = -1./np.pi*(gf[0,i,i,:].imag)
-            f.close()
+            if solver_type == 'cc':
+                f = h5py.File(fn, 'w')
+                for i in range(6):
+                    f['ldos_cc_'+str(i)] = -1./np.pi*(gf[0,i,i,:].imag)
+                f.close()
 
         exit()
         #====================================================>
