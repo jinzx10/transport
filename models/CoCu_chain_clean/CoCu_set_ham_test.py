@@ -10,32 +10,20 @@ from pyscf.pbc.lib import chkfile
 
 from libdmet_solid.lo.iao import reference_mol
 
-import scipy.linalg as sl
 
 ############################################################
 #                       basis
 ############################################################
 Co_basis = 'def2-svp'
 
-if Co_basis == 'def2-svp':
-    # 1s,2s,2p,3s,3p
-    ncore_Co = 9
-    
-    # 3d,4s
-    nval_Co = 6
-    
-    # 4p,4d,4f,5s
-    nvirt_Co = 16
+# 1s,2s,2p,3s,3p
+ncore_Co = 9
 
-if Co_basis == 'def2-svp-bracket':
-    # 1s,2s,2p,3s,3p
-    ncore_Co = 9
-    
-    # 3d,4s
-    nval_Co = 6
-    
-    # 4p,4d,4f,5s
-    nvirt_Co = 9
+# 3d,4s
+nval_Co = 6
+
+# 4p,4d,4f,5s
+nvirt_Co = 16
 
 nao_Co = nval_Co + nvirt_Co # core orbitals are ignored!
 nao_Co_tot = nao_Co + ncore_Co
@@ -80,12 +68,12 @@ if not os.path.exists(datadir):
 # be better computed by the DFT's Fock matrix
 
 # if False, use HF instead
-use_dft = USE_DFT
+use_dft = True
 
 # if use_dft
-xcfun = 'XCFUN'
+xcfun = 'pbe'
 
-do_restricted = DO_RESTRICTED
+do_restricted = True
 
 if do_restricted:
     method_label = 'r'
@@ -109,8 +97,8 @@ nl = nat_Cu // 2
 nr = nat_Cu - nl
 
 # distance between Co and the nearest Cu atoms
-l = LEFT
-r = RIGHT
+l = 2.7
+r = 2.7
 
 # Cu atomic spacing in the lead
 a = 2.55
@@ -199,16 +187,16 @@ kmf.with_df = gdf
 if use_smearing:
     kmf = scf.addons.smearing_(kmf, sigma = smearing_sigma, method = 'fermi')
 else:
+    # newton or diis?
     kmf = kmf.newton()
 
 if os.path.isfile(mf_fname):
     kmf.__dict__.update( chkfile.load(mf_fname, 'scf') )
     print('mean field data loaded!')
-    kmf.kernel()
 else:
     kmf.chkfile = mf_fname
-    kmf.conv_tol = 1e-10
-    kmf.max_cycle = 300
+    kmf.conv_tol = 1e-12
+    kmf.max_cycle = 200
 
     kmf.kernel()
 
@@ -223,58 +211,13 @@ if len(mo_energy.shape) == 2:
 else:
     spin = 2
 
-#################################
-#       sanity check begin
-#################################
-S_ao_ao = kmf.get_ovlp()
-
-hcore_ao = kmf.get_hcore()
-hcore_ao = hcore_ao[0]
-
-JK_ao = kmf.get_veff()
-JK_ao = JK_ao[0]
-
-DM_ao = kmf.make_rdm1() # DM_ao is real!
-DM_ao = DM_ao[0]
-
-# check hcore_ao and JK_ao indeed generate DM_ao
-fock = hcore_ao + JK_ao
-
-e, v = sl.eig(fock, S_ao_ao[0])
-e = e.real
-idx = np.argsort(e)
-e = e[idx]
-v = v[:,idx]
-
-# this v is not normalized to V'*S*V=I
-# normalize below
-v_norm = np.diag(v.T @ S_ao_ao[0] @ v)
-v = v / np.sqrt(v_norm)
-
-print('sanity v S v - eye = ', np.linalg.norm(v.T@S_ao_ao[0]@v-np.eye(nao)))
-
-nocc = (27+nat_Cu*29) // 2
-#dm_test = v[:,:nocc] @ v[:,:nocc].T * 2.0
-
-mo_occ = kmf.mo_occ
-mo_occ = mo_occ[0]
-
-dm_test = (v * mo_occ) @ v.T
-
-print('sanity nocc = ', nocc)
-
-print('sanity sum(mo_occ) = ', np.sum(mo_occ))
-
-print('sanity dm diff = ', np.linalg.norm(dm_test-DM_ao))
-
-# verify DM_ao indeed generates JK_ao
-DM_ao = DM_ao[np.newaxis,...]
-JK_tmp = kmf.get_veff(dm=DM_ao)
-print('sanity JK diff = ', np.linalg.norm(JK_tmp[0]-JK_ao))
-
-#################################
-#       sanity check end
-#################################
+#ihomo = (27+nat_Cu*29) // 2 - 1
+#ilumo = ihomo + 1
+#print('HOMO energy = ', kmf.mo_energy[0][ihomo])
+#print('LUMO energy = ', kmf.mo_energy[0][ilumo])
+#print('HOMO occ = ', kmf.mo_occ[0][ihomo])
+#print('LUMO occ = ', kmf.mo_occ[0][ilumo])
+#exit()
 
 ############################################################
 #               Orbital Localization (IAO)
@@ -353,7 +296,7 @@ if spin == 1:
 if use_reference_mol:
     # C_ao_lo: transformation matrix from AO to LO (IAO) basis, all atoms, core orbitals are excluded
     # C_ao_lo_Co: transformation matrix from AO to LO (IAO) basis, only Co atom, core orbitals are excluded
-    # C_ao_lo_tot: transformation matrix from AO to LO (IAO) basis, all atoms, all orbitals (core included!)
+    # C_ao_lo_tot: transformation matrix from AO to LO (IAO) basis, all atoms, all orbitals (core included)
     C_ao_lo    = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=C_ao_iao.dtype)
     C_ao_lo_Co = np.zeros((spin,nkpts,nao,nao_Co), dtype=C_ao_lo.dtype)
     C_ao_lo_tot = np.zeros((spin,nkpts,nao,nao), dtype=C_ao_lo.dtype)
@@ -370,7 +313,6 @@ if use_reference_mol:
 
     C_ao_lo_Co = C_ao_lo[:,:,:,0:nao_Co]
 
-    #----------------------------------------------------------
     C_ao_lo_tot[:,:,:,0:ncore_Co] = C_ao_iao_core[:,:,:,0:ncore_Co]
     C_ao_lo_tot[:,:,:,ncore_Co:ncore_Co+nval_Co] = C_ao_iao_val[:,:,:,0:nval_Co]
     C_ao_lo_tot[:,:,:,ncore_Co+nval_Co:nao_Co_tot] = C_ao_iao_virt[:,:,:,0:nvirt_Co]
@@ -388,7 +330,7 @@ else:
     # TODO...
     print('rearranging orbitals not implemented!')
 
-if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
+if np.max(np.abs(C_ao_lo.imag)) < 1e-8:
     C_ao_lo = C_ao_lo.real
     C_ao_lo_Co = C_ao_lo_Co.real
     C_ao_lo_tot = C_ao_lo_tot.real
@@ -410,7 +352,57 @@ if plot_orb:
 #           Quantities in LO (IAO) basis
 ############################################################
 S_ao_ao = kmf.get_ovlp()
+S_ao_ao = S_ao_ao[0]
 print('S_ao_ao.shape = ', S_ao_ao.shape)
+
+C_ao_lo_tot = C_ao_lo_tot[0,0]
+print('C_ao_lo_tot.shape = ', C_ao_lo_tot.shape)
+
+DM_ao = kmf.make_rdm1() # DM_ao is real!
+DM_ao = DM_ao[0]
+print('DM_ao.shape = ', DM_ao.shape)
+
+Cinv = np.dot(C_ao_lo_tot.T.conj(),S_ao_ao)
+DM_lo_tot = np.dot(np.dot(Cinv, DM_ao), Cinv.T.conj())
+
+hcore_ao = kmf.get_hcore()
+hcore_ao = hcore_ao[0]
+
+JK_ao = kmf.get_veff()
+JK_ao = JK_ao[0]
+
+fname = datadir + '/imp_rks_check.h5'
+fh = h5py.File(fname, 'w')
+fh['C_ao_lo_tot'] = C_ao_lo_tot
+fh['DM_lo_tot'] = DM_lo_tot
+fh['S_ao_ao'] = S_ao_ao
+fh['DM_ao'] = DM_ao
+fh['JK_ao'] = JK_ao
+fh['hcore_ao'] = hcore_ao
+fh.close()
+
+print('diff = ', np.linalg.norm(np.eye(nao)-C_ao_lo_tot.T.conj()@S_ao_ao@C_ao_lo_tot))
+print('diff = ', np.linalg.norm(C_ao_lo_tot[:,9:31]-C_ao_lo_Co[0,0]))
+
+# check hcore_ao and JK_ao generates DM_ao
+fock = hcore_ao + JK_ao
+e, v = np.linalg.eigh(fock)
+nocc = (27+nat_Cu*29) // 2
+dm = v[:,:nocc] @ v[:,:nocc].T
+
+print('dm diff = ', np.linalg.norm(dm-DM_ao))
+
+# check DM_ao generates JK_ao
+DM_ao = DM_ao[np.newaxis,...]
+JK_tmp = kmf.get_veff(dm=DM_ao)
+print('JK diff = ', np.linalg.norm(JK_tmp[0]-JK_ao))
+
+
+exit()
+
+######################################################################
+######################################################################
+
 
 
 fname = datadir + '/C_ao_lo_' + cell_label + '_' + method_label + '.h5'
@@ -419,7 +411,6 @@ f['C_ao_lo'] = C_ao_lo
 f['C_ao_lo_Co'] = C_ao_lo_Co
 f['S_ao_ao'] = S_ao_ao
 f.close()
-
 
 # get density matrix in IAO basis
 DM_ao = kmf.make_rdm1() # DM_ao is real!
