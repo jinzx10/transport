@@ -1,4 +1,5 @@
 from linesearch import linesearch
+import numpy as np
 
 def rotate(C_in, U, Sigma, V, alpha):
     return ( C_in @ V * np.cos(alpha*Sigma) + U * np.sin(alpha*Sigma) ) @ V.T
@@ -23,11 +24,11 @@ def rPT2(M, U, Delta2):
 
     # M = -C*V.*sin(Sigma*alpha) + U.*(cos(Sigma*alpha)-1)
 
-    return Delta2 - M @ ( (M+U).T @ Delta2 );
+    return Delta2 - M @ ( (M+U).T @ Delta2 )
 
 
 # limited-memory geometric direct minimization
-def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wolfe2=0.9):
+def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wolfe2=0.6):
     C = C0
 
     # iteration history
@@ -39,10 +40,13 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wo
     G = dE(C)
     G = G - C @ (C.T @ G)
 
-    Gmax = np.max(np.abs(G))
-    if Gmax < conv_thr:
+    # error
+    get_err = lambda G: np.max(np.abs(G))
+
+    err = get_err(G)
+    if err < conv_thr:
         print('convergence achieved before iteration!')
-        return C, 0, np.array([[Gmax, E(C), 0]])
+        return C, 0, np.array([[err, E(C), 0]])
 
     # sizes of the basis and occupied space
     N, L = C.shape
@@ -62,7 +66,7 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wo
     UU = np.zeros((N,L,store_limit))
     MM = np.zeros((N,L,store_limit))
 
-    def BG2(i, n, B0_diag, G):
+    def BG2(i, n, G):
         # calculate Delta=B*G where B is the approximate inverse Hessian and G is a
         # tangent vector
         # B is stored by its initial guess (B0_diag) and update vectors (S and Y)
@@ -84,11 +88,11 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wo
 
             # tmp = (PTk*B(k-1)*rPTk)*tmp
             tmp = rPT2(MM[:,:,i], UU[:,:,i], tmp)
-            tmp = BG2(np.mod(i-1, store_limit), n-1, B0_diag, tmp)
+            tmp = BG2(np.mod(i-1, store_limit), n-1, tmp)
             tmp = PT2(MM[:,:,i], UU[:,:,i], tmp)
 
             # tmp = (I-(sk*yk')/(yk'*sk))*tmp
-            tmp = tmp - np.reshape( S[:,i] * (np.dot(Y[:,i],tmp.reshape(-1))/YS(i)), (N,L) )
+            tmp = tmp - np.reshape( S[:,i] * (np.dot(Y[:,i],tmp.reshape(-1))/YS[i]), (N,L) )
 
             # Delta = tmp + (sk*sk')/(yk'*sk)*G
             Delta = tmp + np.reshape( S[:,i] * (SG/YS[i]), (N,L) );
@@ -98,30 +102,35 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wo
 
     for i in range(0, max_iter):
 
-        # index of quantities in limited-memory storage (UU,MM,S,Y,YS)
+        # index for quantities (UU,MM,S,Y,YS) to store for this iteration
         istore = np.mod(i, store_limit)
 
         # get search direction Delta
         # for i=0, Delta is simply the steepest descent direction:
-        # Delta(i=0) = (I-C*C^T)*(FC)
+        # Delta(i=0) = (I-C*C^T)*dE
         # in subsequent iterations, the direction is the approximate inverse
         # Hessian times the steepest descent direction
-        Delta = -BG2( np.mod(istore-1,store_limit), min(i, store_limit), B0_diag, MM, UU, S, Y, YS, G)
-        Delta = Delta - C @ ( C.T @ Delta )
+        Delta = -BG2( np.mod(istore-1,store_limit), min(i, store_limit), G)
+        Delta = Delta - C @ ( C.T @ Delta ) # optional?
 
         # Delta is N-by-L
-        U, Sigma, V = np.linalg.svd(Delta, full_matrices=False)
-
+        U, Sigma, VT = np.linalg.svd(Delta, full_matrices=False)
+        V = VT.T
         df = lambda a: np.sum( dE( rotate(C, U, Sigma, V, a) ) \
                 * ( ( C @ V * (-Sigma*np.sin(a*Sigma)) + U * (Sigma*np.cos(a*Sigma)) ) @ V.T ) )
+        if df(0) > 0:
+            Delta = -Delta
+            V = -V
+            df = lambda a: np.sum( dE( rotate(C, U, Sigma, V, a) ) \
+                    * ( ( C @ V * (-Sigma*np.sin(a*Sigma)) + U * (Sigma*np.cos(a*Sigma)) ) @ V.T ) )
 
         f = lambda a: E( rotate(C, U, Sigma, V, a) )
 
         # find a step size that satisfies the strong Wolfe conditions
-        alpha = linesearch(f, df, wolfe1, wolfe2, alpha)
+        alpha, ls_flag = linesearch(f, df, alpha0=alpha, wolfe1=wolfe1, wolfe2=wolfe2)
 
         # matrices used in parallel transport
-        M = -C@V*np.sin(Sigma*alpha) + U*(np.cos(Sigma*alpha)-1)
+        M = -C @ V * np.sin(Sigma*alpha) + U * (np.cos(Sigma*alpha)-1)
         UU[:,:,istore] = U
         MM[:,:,istore] = M
 
@@ -142,20 +151,20 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wo
         # but here G is defined with respect to the old position, so we need to
         # parallel transport it to the current position
         Y[:,istore] = (G_new - PT2(M, U, G)).reshape(-1)
-        YS[istore] = np.dot(Y[:,istore],S[:,istore])
+        YS[istore] = np.dot(Y[:,istore], S[:,istore])
         B0_diag = np.ones(N*L) * np.abs( YS[istore] / np.dot(Y[:,istore],Y[:,istore]) )
 
         G = G_new
         C = C_new
 
-        Gmax = np.max(np.abs(G))
+        err = get_err(G)
         Enow = E(C)
 
-        print('step: %4i    err = %8.5f    E = %17.12f    alpha = %6.4f' %(i, Gmax, Enow, alpha))
-        iter_hist[i,:] = np.array([Gmax, Enow, alpha])
+        print('step: %4i    err = %8.5e    E = %17.12f    alpha = %6.4f' %(i+1, err, Enow, alpha))
+        iter_hist[i,:] = np.array([err, Enow, alpha])
 
-        if Gmax < conv_thr:
-            print('convergence achieved in %4i iterations' %(i+1))
+        if err < conv_thr:
+            print('convergence achieved!')
             iter_hist = np.resize(iter_hist, (i+1,3))
             return C, 0, iter_hist
 

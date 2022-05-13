@@ -67,7 +67,8 @@ def linesearch(f, df, alpha0=1.0, wolfe1=0.1, wolfe2=0.9, alpha_min = 1e-6, alph
         if dphi[i] >= 0:
             return zoom(alpha[i], alpha[i-1])
 
-        alpha[i+1] = min(l*alpha[i], alpha_max)
+        if i != max_iter-1:
+            alpha[i+1] = min(l*alpha[i], alpha_max)
 
     print('line search failed within', max_iter, 'iterations')
     return alpha[-1], 2

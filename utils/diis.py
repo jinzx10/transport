@@ -4,9 +4,10 @@ import scipy.sparse as sp
 
 def add_diff(f, x):
     fx = f(x)
-    return [fx, fx-x]
+    return fx, fx-x
 
-def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 20):
+
+def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 15):
     '''
     Use Pulay mixing (Direct Inversion in the Iterative Subspace) to find x such that x = f(x)
     '''
@@ -20,20 +21,23 @@ def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 20):
         g = lambda y : add_diff(f, y)
 
     if np.linalg.norm(r,1) < conv_tol:
+        print('converence achieved before iteration!')
         return x0, 0
 
-    szx = np.prod(x.shape)
+    sz_x = np.prod(x.shape)
 
     x_is_sparse = sp.issparse(x)
-
+    
+    # xs stores iteration history
     if x_is_sparse:
-        xs = sp.lil_matrix((1, szx))
-        xs[0,:] = np.reshape(x,(1,szx))
+        xs = sp.lil_matrix((1, sz_x))
+        xs[0,:] = np.reshape(x,(1,sz_x))
     else:
-        xs = np.zeros((1, szx)) # iteration history
+        xs = np.zeros((1, sz_x)) 
         xs[0,:] = x.flatten()
 
-    rs = np.zeros((1, r.size)) # error vectors
+    # rs stores error vectors
+    rs = np.zeros((1, r.size)) 
     rs[0,:] = r.flatten()
 
     B = rs @ rs.T.conj()
@@ -42,20 +46,20 @@ def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 20):
                                      np.append(   np.ones(np.size(B,0)),          0                  ) ) )
 
     for counter in range(0, max_iter):
-        # Pulay mixing
-        # use pseudo-inverse to handle possible singularity of the DIIS matrix
-        #c = np.linalg.lstsq(diis_mat(), np.append(np.zeros(np.size(B,0)), 1.0), rcond=1e-12)[0]
-        c = np.linalg.pinv(diis_mat()) @ np.append(np.zeros(np.size(B,0)), 1.0)
-        x_mix = np.reshape( c[:-1] @ xs, np.shape(x0) )
+        c = np.linalg.lstsq(diis_mat(), np.append(np.zeros(np.size(B,0)), 1.0), rcond=-1)[0]
+        x_mix = np.reshape( c[:-1] @ xs, x0.shape )
 
         x, r = g(x_mix)
-        #print('err = ', np.linalg.norm(r))
+        err = np.linalg.norm(r,1)
+
+        print('step = %4i    err = %8.5e' %(counter+1, err))
+
         if np.linalg.norm(r,1) < conv_tol:
-            print('converence achieved in', counter+1, 'steps')
+            print('converence achieved!')
             return x, 0
         
         if x_is_sparse:
-            xs = sp.vstack((xs, np.reshape(x, (1,szx))), format='lil')
+            xs = sp.vstack((xs, np.reshape(x, (1,sz_x))), format='lil')
         else:
             xs = np.vstack((xs, x.flatten()))
 
@@ -70,10 +74,9 @@ def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 20):
                 xs = xs[1:,:]
             else:
                 xs = np.delete(xs, 0, axis=0)
-            B = np.delete(B, 0, axis=0)
-            B = np.delete(B, 0, axis=1)
+            B = B[1:,1:]
             continue
 
-    print('DIIS fails to converge.')
+    print('DIIS failed to converge.')
     return None, 1
 
