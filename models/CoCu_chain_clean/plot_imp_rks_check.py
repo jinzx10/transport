@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import h5py
 
 
-fh = h5py.File('imp_rks_check.h5', 'r')
+fh = h5py.File('imp_rks_ldos.h5', 'r')
 
 freqs = np.asarray(fh['freqs'])
 ldos = np.asarray(fh['ldos'])

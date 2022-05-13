@@ -10,7 +10,6 @@ from pyscf.pbc.lib import chkfile
 
 from libdmet_solid.lo.iao import reference_mol
 
-import scipy.linalg as sl
 from pyscf.scf.hf import eig as eiggen
 
 ############################################################
@@ -77,9 +76,6 @@ if not os.path.exists(datadir):
 # The Fock matrix for building the impurity Hamiltonian
 # will use HF anyway.
 
-# TODO: Tianyu & Linqing mentioned that the hybridization might
-# be better computed by the DFT's Fock matrix
-
 # if False, use HF instead
 use_dft = True
 
@@ -97,6 +93,17 @@ if use_dft:
     method_label += 'ks' + '_' + xcfun
 else:
     method_label += 'hf'
+
+# scf solver & addons
+# if use_smearing == True, use Fermi smearing
+# if False, the scf will use newton solver to help convergence
+use_smearing = False
+smearing_sigma = 0.1
+
+if use_smearing:
+    method_label += '_smearing' + str(smearing_sigma)
+#else:
+#    method_label += '_newton'
 
 ############################################################
 #                       build cell
@@ -120,6 +127,7 @@ cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 
 if os.path.isfile(cell_fname):
+    print('ready to load', cell_fname)
     cell = chkfile.load_cell(cell_fname)
     print('cell loaded!')
 else:
@@ -130,7 +138,13 @@ else:
     cell.verbose = 4
     cell.max_memory = 30000
     cell.dimension = 3
+
+    #cell.precision = 1e-10
     cell.ke_cutoff = 500
+
+    # should not discard! 4s and 5s have small exponent
+    #cell.exp_to_discard = 0.1
+
     cell.a = [[l+r+(nat_Cu-1)*a,0,0], [0,20,0], [0,0,20]]
     
     cell.atom.append(['Co', ((nl-1)*a+l, 0, 0)])
@@ -158,7 +172,6 @@ Lat = lattice.Lattice(cell, kmesh)
 nao = Lat.nao
 nkpts = Lat.nkpts
 
-
 ############################################################
 #               density fitting
 ############################################################
@@ -167,6 +180,7 @@ gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
 gdf = df.GDF(cell, kpts)
 
 if os.path.isfile(gdf_fname):
+    print('ready to load', gdf_fname)
     gdf._cderi = gdf_fname
     print('gdf cderi loaded!')
 else:
@@ -177,9 +191,6 @@ else:
 ############################################################
 #           low-level mean-field calculation
 ############################################################
-# if False, the scf will use newton solver to help convergence
-use_smearing = True
-smearing_sigma = 0.2
 
 if use_dft:
     if do_restricted:
@@ -199,17 +210,16 @@ kmf.with_df = gdf
 
 if use_smearing:
     kmf = scf.addons.smearing_(kmf, sigma = smearing_sigma, method = 'fermi')
+    kmf.diis_space = 15
 else:
     kmf = kmf.newton()
 
-    # NOTE temporarily turn off
-    kmf.canonicalization = False
-
 if os.path.isfile(mf_fname):
+    print('ready to load', mf_fname)
     kmf.__dict__.update( chkfile.load(mf_fname, 'scf') )
     print('mean field data loaded!')
-    kmf.max_cycle = 300
     kmf.conv_tol = 1e-10
+    kmf.max_cycle = 300
     kmf.kernel()
 else:
     kmf.chkfile = mf_fname
@@ -233,55 +243,33 @@ else:
 #       sanity check begin
 #################################
 S_ao_ao = kmf.get_ovlp()
-print('S_ao_ao.shape', S_ao_ao.shape)
 
 hcore_ao = kmf.get_hcore()
 hcore_ao = hcore_ao[0]
-print('hcore_ao.shape', hcore_ao.shape)
 
 JK_ao = kmf.get_veff()
 JK_ao = JK_ao[0]
-print('JK_ao.shape', JK_ao.shape)
 
 DM_ao = kmf.make_rdm1() # DM_ao is real!
 DM_ao = DM_ao[0]
-print('DM_ao.shape', DM_ao.shape)
 
 # check hcore_ao and JK_ao indeed generate DM_ao
 fock = hcore_ao + JK_ao
 
-## see newton_ah
-#JK_ao2 = kmf._scf.get_veff(cell, kmf.make_rdm1())
-#JK_ao2 = JK_ao2[0]
-#print('JK diff = ', np.linalg.norm(JK_ao-JK_ao2))
-
-
-fock_ref = kmf.get_fock()
-print('sanity fock: ', np.linalg.norm(fock_ref[0]-fock))
-
 e, v = eiggen(fock, S_ao_ao[0])
-print('sanity v" S v - eye = ', np.linalg.norm(v.T@S_ao_ao[0]@v-np.eye(nao)))
+
 
 mo_energy = kmf.mo_energy
 mo_energy = mo_energy[0]
 print('sanity: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mo_energy-e))
-#print('mo_energy = ', mo_energy)
-#print('fock eigval = ', e)
-#print('diff energy = ', mo_energy - e)
 
-mo_coeff = kmf.mo_coeff
-mo_coeff = mo_coeff[0]
+nocc = (27+nat_Cu*29) // 2
 
 mo_occ = kmf.mo_occ
 mo_occ = mo_occ[0]
 
-#dm2 = (mo_coeff * mo_occ) @ mo_coeff.T.conj()
-#print('sanity dm built from mo_coeff & mo_occ vs. make_rdm1: ', np.linalg.norm(dm2-DM_ao) )
-
-
 dm_fock = (v * mo_occ) @ v.T
 
-nocc = (27+nat_Cu*29) // 2
 print('sanity nocc = ', nocc)
 
 print('sanity sum(mo_occ) = ', np.sum(mo_occ))
@@ -293,11 +281,41 @@ DM_ao = DM_ao[np.newaxis,...]
 JK_tmp = kmf.get_veff(dm=DM_ao)
 print('sanity JK diff = ', np.linalg.norm(JK_tmp[0]-JK_ao))
 
-exit()
-
 #################################
 #       sanity check end
 #################################
+
+if Co_basis == 'def2-svp':
+    # 1s,2s,2p,3s,3p
+    ncore_Co = 9
+    
+    # 3d,4s
+    nval_Co = 6
+    
+    # 4p,4d,4f,5s
+    nvirt_Co = 16
+
+if Co_basis == 'def2-svp-bracket':
+    # 1s,2s,2p,3s,3p
+    ncore_Co = 9
+    
+    # 3d,4s
+    nval_Co = 6
+    
+    # 4p,4d,4f,5s
+    nvirt_Co = 9
+
+nao_Co = nval_Co + nvirt_Co # core orbitals are ignored!
+nao_Co_tot = nao_Co + ncore_Co
+
+if Cu_basis == 'def2-svp-bracket':
+    ncore_Cu = 9
+    nval_Cu = 6
+    nvirt_Cu = 9
+
+nao_Cu = nval_Cu + nvirt_Cu
+nao_Cu_tot = nao_Cu + ncore_Cu
+
 
 ############################################################
 #               Orbital Localization (IAO)
@@ -432,6 +450,8 @@ if plot_orb:
 ############################################################
 #           Quantities in LO (IAO) basis
 ############################################################
+
+
 S_ao_ao = kmf.get_ovlp()
 print('S_ao_ao.shape = ', S_ao_ao.shape)
 
@@ -554,5 +574,37 @@ if use_dft:
     f['JK_lo_hf'] = JK_lo_hf
     f['JK_lo_hf_Co'] = JK_lo_hf_Co
     f.close()
+
+
+#######################################
+
+fname = datadir + '/CoCu_set_ham_test.h5'
+fh = h5py.File(fname, 'w')
+JK_ao = np.asarray(kmf.get_veff())[0]
+DM_ao = np.asarray(kmf.make_rdm1())[0]
+S_ao_ao = np.asarray(kmf.get_ovlp())[0]
+hcore_ao = np.asarray(kmf.get_hcore())[0]
+C_ao_lo_tot = C_ao_lo_tot[0,0]
+
+DM_lo_tot = np.zeros_like(DM_ao)
+Cinv = C_ao_lo_tot.T.conj() @ S_ao_ao
+DM_lo_tot = Cinv @ DM_ao @ Cinv.T.conj()
+
+fh['hcore_ao'] = hcore_ao
+fh['JK_ao'] = JK_ao
+fh['DM_ao'] = DM_ao
+fh['S_ao_ao'] = S_ao_ao
+fh['C_ao_lo_tot'] = C_ao_lo_tot
+fh['DM_lo_tot'] = DM_lo_tot
+fh.close()
+
+print('hcore_ao.shape = ', hcore_ao.shape)
+print('JK_ao.shape = ', JK_ao.shape)
+print('S_ao_ao.shape = ', S_ao_ao.shape)
+print('DM_ao.shape = ', DM_ao.shape)
+print('C_ao_lo_tot.shape = ', C_ao_lo_tot.shape)
+print('DM_lo_tot.shape = ', DM_lo_tot.shape)
+
+#######################################
 
 

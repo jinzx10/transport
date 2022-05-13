@@ -21,8 +21,8 @@ def diis(f, x0, conv_tol = 1e-6, max_iter = 50, max_subspace_size = 15):
     if np.linalg.norm(r,1) < conv_tol:
         return 0, x0
 
-    xs = np.zeros((1, x0.size)) # iteration history
-    rs = np.zeros((1, x0.size)) # error vectors
+    xs = np.zeros((1, x.size)) # iteration history
+    rs = np.zeros((1, r.size)) # error vectors
 
     xs[0,:] = x.flatten()
     rs[0,:] = r.flatten()

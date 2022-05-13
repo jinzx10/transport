@@ -19,6 +19,8 @@ from pyscf.pbc.lib import chkfile
 from pyscf.pbc import dft as pbcdft
 from diis import diis
 
+from pyscf.scf.hf import eig as eiggen
+
 class RHF2(scf.hf.RHF):
 
     __doc__ = scf.hf.RHF.__doc__
@@ -29,7 +31,7 @@ class RHF2(scf.hf.RHF):
         l = 2.7
         r = 2.7
         a = 2.55
-        datadir = 'Co_def2-svp_Cu_def2-svp-bracket/'
+        datadir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
 
         cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
         cell_fname = datadir + '/cell_' + cell_label + '.chk'
@@ -49,7 +51,7 @@ class RHF2(scf.hf.RHF):
         self._kmf.xc = 'pbe'
         self._kmf.with_df = self._gdf
 
-        fname = datadir + '/imp_rks_check.h5'
+        fname = datadir + '/CoCu_set_ham_test.h5'
         fh = h5py.File(fname, 'r')
         self._C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])
         self._DM_lo_tot = np.asarray(fh['DM_lo_tot'])
@@ -84,7 +86,7 @@ class RHF2(scf.hf.RHF):
         # DM in LO basis, all orbitals (core+val+virt)
         dm_tot_lo = np.copy(self._DM_lo_tot)
 
-        # AO-to-LO transformation matrix (include all LO)
+        # C is the AO-to-LO transformation matrix (all LO, including core)
         C = np.copy(self._C_ao_lo_tot)
 
         # replace the Co val+virt block
@@ -101,14 +103,17 @@ class RHF2(scf.hf.RHF):
         # compute veff
         veff_ao = self._kmf.get_veff(dm=dm_tot_ao)
 
-        # now veff_ao is a tagged array
+        # veff_ao is a tagged array, extract its content
         veff_ao = np.asarray(veff_ao)[0]
 
         # transform to LO
-        veff_lo = np.dot(np.dot(C.T.conj(), veff_ao), C)
+        veff_lo = C.T.conj() @ veff_ao @ C
+        #veff_lo = np.dot(np.dot(C.T.conj(), veff_ao), C)
 
         veff_diff = veff_lo[9:31,9:31] - self._veff_ref
 
+        # veff in the embedding model
+        # only non-zero in the imp block
         veff = np.zeros_like(dm)
 
         # extract Co val+virt
@@ -227,7 +232,7 @@ nprocs = comm.Get_size()
 #           read contact's mean-field data
 ############################################################
 
-contact_dir = 'Co_def2-svp_Cu_def2-svp-bracket/'
+contact_dir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
 
 if rank == 0:
     print('reading contact\'s mean field data from', contact_dir)
@@ -238,7 +243,7 @@ l = 2.7
 r = 2.7
 
 cell_label = 'CoCu_' + str(nat_Cu_contact) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
-method_label = 'rks'
+method_label = 'rks_pbe'
 
 #------------ read core Hamiltonian and DFT veff (built with DFT DM)  ------------
 fname = contact_dir + '/hcore_JK_lo_' + cell_label + '_' + method_label + '.h5'
@@ -431,7 +436,7 @@ nat_Cu = 9
 l = 2.7
 r = 2.7
 a = 2.55
-datadir = 'Co_def2-svp_Cu_def2-svp-bracket/'
+datadir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
 
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 cell = chkfile.load_cell(cell_fname)
@@ -448,7 +453,7 @@ kmf.xc = 'pbe'
 kmf.with_df = gdf
 
 
-fname = datadir + '/imp_rks_check.h5'
+fname = datadir + '/CoCu_set_ham_test.h5'
 fh = h5py.File(fname, 'r')
 C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])
 DM_lo_tot = np.asarray(fh['DM_lo_tot'])
@@ -480,7 +485,8 @@ DM_ao_tmp = DM_ao_tmp[np.newaxis,...]
 JK_ao_tmp = np.asarray(kmf.get_veff(dm=DM_ao_tmp))[0]
 
 # transform the potential to LO basis
-JK_lo_tmp = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao_tmp), C_ao_lo_tot)
+JK_lo_tmp = C_ao_lo_tot.T.conj() @ JK_ao_tmp @ C_ao_lo_tot
+#JK_lo_tmp = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao_tmp), C_ao_lo_tot)
 JK_lo_tmp = JK_lo_tmp[np.newaxis,...]
 
 # take the different for the Co val+virt block
@@ -610,7 +616,7 @@ def gen_log_grid(w0, w, l, num):
 #   embedding model Co LDoS solved by mean-field
 ############################################################
 
-mu = -0.1451
+mu = -0.145
 
 #------------ bath discretization ------------
 # evenly spaced grid
@@ -679,46 +685,70 @@ mf.conv_tol = 1e-12
 mf.diis_space = 15
 
 
-#veff_test = mf.get_veff(mol=mol,dm=dm0[0])
-#fock_Co_test = veff_test[:22,:22] + mf.get_hcore()[:22,:22]
-#fock_Co_ref = hcore_lo_Co + JK_lo_ks_Co
-#fock_Co_ref = fock_Co_ref[0]
-#print('diff = ', np.linalg.norm(fock_Co_ref-fock_Co_test))
-#exit()
+# sanity check
+# mf.get_veff returns intra-(Co val+virt) veff
+# Cu-to-Co veff is incorporated in mf.hcore (which is Himp_Co) and is stored as mf._veff_ref
+veff_test = mf.get_veff(mol=mol,dm=dm0[0])
+fock_Co_test = veff_test[:22,:22] + mf.get_hcore()[:22,:22]
+fock_Co_ref = hcore_lo_Co + JK_lo_ks_Co
+fock_Co_ref = fock_Co_ref[0]
+print('sanity check: fock_Co diff = ', np.linalg.norm(fock_Co_ref-fock_Co_test))
 
 
-#_,veff_test = mf.get_veff(mol=mol,dm=dm0[0])
-#JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao), C_ao_lo_tot)
-#print('diff = ', np.linalg.norm(veff_test-JK_lo_tot))
-#exit()
+veff_test = mf.get_veff(mol=mol,dm=dm0[0])
+JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao), C_ao_lo_tot)
+print('diff = ', np.linalg.norm(veff_test[0:22,0:22]+mf._veff_ref-JK_lo_tot[9:31,9:31]))
 
 veff_0 = mf.get_veff(mol=mol,dm=dm0[0])
 fock_0 = veff_0 + mf.get_hcore()
-e,v = np.linalg.eigh(fock_0)
-print('e = ', e)
+print('fock_0.shape = ', fock_0.shape)
+
+e,v = eiggen(fock_0, np.eye(nemb))
+#print('e = ', e)
 v_occ = v[:, e<mu]
 dm_new = 2. * v_occ @ v_occ.T
 print('Co nelec = ', np.trace(dm_new[:22,:22]))
 print('dm diff = ', np.linalg.norm(dm_new[:22,:22]-dm0[0,:22,:22]) )
 
+# one Fock iteration for embedding Hamiltonian
 def fock2fock(fock_in):
-    e,v = np.linalg.eigh(fock_in)
+    e,v = eiggen(fock_in, np.eye(nemb))
     v_occ = v[:, e<mu]
     dm = 2. * v_occ @ v_occ.T
-    fock_out = mf.get_veff(mol=mol, dm=dm)
+    fock_out = mf.get_hcore() + mf.get_veff(mol=mol, dm=dm)
     return fock_out
 
-print('fock_0.shape = ', fock_0.shape)
+# for Commutator-DIIS
+smearing_sigma = 0.1
+chem_pot = -0.16
+def fock2fockcomm(fock_in):
+    e,v = eiggen(fock_in, np.eye(nemb))
+    
+    # use fermi broadening to assist convergence
+    #v_occ = v[:, e<mu]
+    #dm = 2. * v_occ @ v_occ.T
 
-fock_1 = fock2fock(fock_0)
-print('fock_1.shape = ', fock_1.shape)
+    chem_pot = -0.16
 
-flag, fock = diis(fock2fock, fock_0)
-print('fock.shape = ', fock.shape)
+    occ = 2./( 1. + np.exp((e-chem_pot)/smearing_sigma) )
+    dm = (v*occ) @ v.T
 
-e,v = np.linalg.eigh(fock)
-v_occ = v[:, e<mu]
-rdm1 = 2. * v_occ @ v_occ.T
+    fock_out = mf.get_hcore() + mf.get_veff(mol=mol, dm=dm)
+    comm = fock_out @ dm - dm @ fock_out
+    return fock_out, comm
+
+
+flag, fock = diis(fock2fockcomm, fock_0, max_iter=300)
+
+if flag == 0:
+    print('fock.shape = ', fock.shape)
+else:
+    exit()
+
+e,v = eiggen(fock, np.eye(nemb))
+
+occ = 2./( 1. + np.exp((e-chem_pot)/smearing_sigma) )
+rdm1 = (v*occ) @ v.T
 
 #exit()
 
@@ -770,7 +800,7 @@ for iw in range(nwd):
     for s in range(spin):
         ldos[s,iw,:] = -1./np.pi*np.diag(GC[s,:nval_Co, :nval_Co]).imag
 
-fh = h5py.File('imp_rks_check.h5', 'w')
+fh = h5py.File('imp_rks_ldos.h5', 'w')
 fh['freqs'] = freqs
 fh['A'] = A[0,:,:]
 fh['ldos'] = ldos[0,:,:]

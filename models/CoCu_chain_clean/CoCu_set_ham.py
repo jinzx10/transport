@@ -10,44 +10,15 @@ from pyscf.pbc.lib import chkfile
 
 from libdmet_solid.lo.iao import reference_mol
 
-import scipy.linalg as sl
+from pyscf.scf.hf import eig as eiggen
 
 ############################################################
 #                       basis
 ############################################################
 Co_basis = 'def2-svp'
 
-if Co_basis == 'def2-svp':
-    # 1s,2s,2p,3s,3p
-    ncore_Co = 9
-    
-    # 3d,4s
-    nval_Co = 6
-    
-    # 4p,4d,4f,5s
-    nvirt_Co = 16
-
-if Co_basis == 'def2-svp-bracket':
-    # 1s,2s,2p,3s,3p
-    ncore_Co = 9
-    
-    # 3d,4s
-    nval_Co = 6
-    
-    # 4p,4d,4f,5s
-    nvirt_Co = 9
-
-nao_Co = nval_Co + nvirt_Co # core orbitals are ignored!
-nao_Co_tot = nao_Co + ncore_Co
 
 Cu_basis = 'def2-svp-bracket'
-
-ncore_Cu = 9
-nval_Cu = 6
-nvirt_Cu = 9
-
-nao_Cu = nval_Cu + nvirt_Cu
-nao_Cu_tot = nao_Cu + ncore_Cu
 
 
 ############################################################
@@ -76,9 +47,6 @@ if not os.path.exists(datadir):
 # The Fock matrix for building the impurity Hamiltonian
 # will use HF anyway.
 
-# TODO: Tianyu & Linqing mentioned that the hybridization might
-# be better computed by the DFT's Fock matrix
-
 # if False, use HF instead
 use_dft = USE_DFT
 
@@ -97,11 +65,22 @@ if use_dft:
 else:
     method_label += 'hf'
 
+# scf solver & addons
+# if use_smearing == True, use Fermi smearing
+# if False, the scf will use newton solver to help convergence
+use_smearing = USE_SMEARING
+smearing_sigma = SMEARING_SIGMA
+
+if use_smearing:
+    method_label += '_smearing' + str(smearing_sigma)
+else:
+    method_label += '_newton'
+
 ############################################################
 #                       build cell
 ############################################################
 # total number of Cu atoms (left + right)
-nat_Cu = 9
+nat_Cu = NAT_CU
 assert(nat_Cu%2 == 1)
 
 # number of Cu atoms in the left/right lead
@@ -113,12 +92,13 @@ l = LEFT
 r = RIGHT
 
 # Cu atomic spacing in the lead
-a = 2.55
+a = SPACING
 
 cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 
 if os.path.isfile(cell_fname):
+    print('ready to load', cell_fname)
     cell = chkfile.load_cell(cell_fname)
     print('cell loaded!')
 else:
@@ -129,7 +109,13 @@ else:
     cell.verbose = 4
     cell.max_memory = 30000
     cell.dimension = 3
+
+    #cell.precision = 1e-10
     cell.ke_cutoff = 500
+
+    # should not discard! 4s and 5s have small exponent
+    #cell.exp_to_discard = 0.1
+
     cell.a = [[l+r+(nat_Cu-1)*a,0,0], [0,20,0], [0,0,20]]
     
     cell.atom.append(['Co', ((nl-1)*a+l, 0, 0)])
@@ -157,7 +143,6 @@ Lat = lattice.Lattice(cell, kmesh)
 nao = Lat.nao
 nkpts = Lat.nkpts
 
-
 ############################################################
 #               density fitting
 ############################################################
@@ -166,6 +151,7 @@ gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
 gdf = df.GDF(cell, kpts)
 
 if os.path.isfile(gdf_fname):
+    print('ready to load', gdf_fname)
     gdf._cderi = gdf_fname
     print('gdf cderi loaded!')
 else:
@@ -176,9 +162,6 @@ else:
 ############################################################
 #           low-level mean-field calculation
 ############################################################
-# if False, the scf will use newton solver to help convergence
-use_smearing = False
-smearing_sigma = 0.05
 
 if use_dft:
     if do_restricted:
@@ -198,12 +181,16 @@ kmf.with_df = gdf
 
 if use_smearing:
     kmf = scf.addons.smearing_(kmf, sigma = smearing_sigma, method = 'fermi')
+    kmf.diis_space = 15
 else:
     kmf = kmf.newton()
 
 if os.path.isfile(mf_fname):
+    print('ready to load', mf_fname)
     kmf.__dict__.update( chkfile.load(mf_fname, 'scf') )
     print('mean field data loaded!')
+    kmf.conv_tol = 1e-10
+    kmf.max_cycle = 300
     kmf.kernel()
 else:
     kmf.chkfile = mf_fname
@@ -240,41 +227,67 @@ DM_ao = DM_ao[0]
 # check hcore_ao and JK_ao indeed generate DM_ao
 fock = hcore_ao + JK_ao
 
-e, v = sl.eig(fock, S_ao_ao[0])
-e = e.real
-idx = np.argsort(e)
-e = e[idx]
-v = v[:,idx]
+e, v = eiggen(fock, S_ao_ao[0])
 
-# this v is not normalized to V'*S*V=I
-# normalize below
-v_norm = np.diag(v.T @ S_ao_ao[0] @ v)
-v = v / np.sqrt(v_norm)
 
-print('sanity v S v - eye = ', np.linalg.norm(v.T@S_ao_ao[0]@v-np.eye(nao)))
+mo_energy = kmf.mo_energy
+mo_energy = mo_energy[0]
+print('sanity: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mo_energy-e))
 
 nocc = (27+nat_Cu*29) // 2
-#dm_test = v[:,:nocc] @ v[:,:nocc].T * 2.0
+print('sanity nocc = ', nocc)
 
 mo_occ = kmf.mo_occ
 mo_occ = mo_occ[0]
 
-dm_test = (v * mo_occ) @ v.T
-
-print('sanity nocc = ', nocc)
+dm_fock = (v * mo_occ) @ v.T
 
 print('sanity sum(mo_occ) = ', np.sum(mo_occ))
 
-print('sanity dm diff = ', np.linalg.norm(dm_test-DM_ao))
+print('sanity: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao))
 
 # verify DM_ao indeed generates JK_ao
 DM_ao = DM_ao[np.newaxis,...]
 JK_tmp = kmf.get_veff(dm=DM_ao)
 print('sanity JK diff = ', np.linalg.norm(JK_tmp[0]-JK_ao))
 
+exit()
+
 #################################
 #       sanity check end
 #################################
+
+if Co_basis == 'def2-svp':
+    # 1s,2s,2p,3s,3p
+    ncore_Co = 9
+    
+    # 3d,4s
+    nval_Co = 6
+    
+    # 4p,4d,4f,5s
+    nvirt_Co = 16
+
+if Co_basis == 'def2-svp-bracket':
+    # 1s,2s,2p,3s,3p
+    ncore_Co = 9
+    
+    # 3d,4s
+    nval_Co = 6
+    
+    # 4p,4d,4f,5s
+    nvirt_Co = 9
+
+nao_Co = nval_Co + nvirt_Co # core orbitals are ignored!
+nao_Co_tot = nao_Co + ncore_Co
+
+if Cu_basis == 'def2-svp-bracket':
+    ncore_Cu = 9
+    nval_Cu = 6
+    nvirt_Cu = 9
+
+nao_Cu = nval_Cu + nvirt_Cu
+nao_Cu_tot = nao_Cu + ncore_Cu
+
 
 ############################################################
 #               Orbital Localization (IAO)
@@ -396,7 +409,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = False
+plot_orb = True
 
 if plot_orb:
     plotdir = datadir + '/plot_' + cell_label + '_' + method_label
