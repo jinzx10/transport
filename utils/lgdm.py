@@ -1,8 +1,12 @@
-from linesearch import linesearch
+from utils.linesearch import linesearch
 import numpy as np
 
-def rotate(C_in, U, Sigma, V, alpha):
-    return ( C_in @ V * np.cos(alpha*Sigma) + U * np.sin(alpha*Sigma) ) @ V.T
+def rotate(C_in, U, Sigma, VT, alpha):
+    C_tmp = ( C_in @ VT.T * np.cos(alpha*Sigma) + U * np.sin(alpha*Sigma) ) @ VT
+
+    # ensure semi-orthogonality to improve numerical stability
+    u, _, vt = np.linalg.svd(C_tmp, full_matrices=False)
+    return u @ vt
 
 
 def PT2(M, U, Delta):
@@ -28,7 +32,7 @@ def rPT2(M, U, Delta2):
 
 
 # limited-memory geometric direct minimization
-def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wolfe2=0.6):
+def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.1, wolfe2=0.9, return_hist=False, max_restart=10):
     C = C0
 
     # iteration history
@@ -43,10 +47,17 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wo
     # error
     get_err = lambda G: np.max(np.abs(G))
 
+    def gen_return(status, num_iter):
+        if return_hist:
+            return C, status, iter_hist[:num_iter,:]
+        else:
+            return C, status
+
     err = get_err(G)
     if err < conv_thr:
         print('convergence achieved before iteration!')
-        return C, 0, np.array([[err, E(C), 0]])
+        iter_hist = np.array([[err, E(C), 0]])
+        return gen_return(0, 0)
 
     # sizes of the basis and occupied space
     N, L = C.shape
@@ -66,7 +77,7 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wo
     UU = np.zeros((N,L,store_limit))
     MM = np.zeros((N,L,store_limit))
 
-    def BG2(i, n, G):
+    def BG(i, n, G):
         # calculate Delta=B*G where B is the approximate inverse Hessian and G is a
         # tangent vector
         # B is stored by its initial guess (B0_diag) and update vectors (S and Y)
@@ -88,7 +99,7 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wo
 
             # tmp = (PTk*B(k-1)*rPTk)*tmp
             tmp = rPT2(MM[:,:,i], UU[:,:,i], tmp)
-            tmp = BG2(np.mod(i-1, store_limit), n-1, tmp)
+            tmp = BG(np.mod(i-1, store_limit), n-1, tmp)
             tmp = PT2(MM[:,:,i], UU[:,:,i], tmp)
 
             # tmp = (I-(sk*yk')/(yk'*sk))*tmp
@@ -99,43 +110,68 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wo
 
         return Delta
 
+    nstore = 0
+    istore = -1
+    restart_count = 0
 
     for i in range(0, max_iter):
-
-        # index for quantities (UU,MM,S,Y,YS) to store for this iteration
-        istore = np.mod(i, store_limit)
 
         # get search direction Delta
         # for i=0, Delta is simply the steepest descent direction:
         # Delta(i=0) = (I-C*C^T)*dE
         # in subsequent iterations, the direction is the approximate inverse
         # Hessian times the steepest descent direction
-        Delta = -BG2( np.mod(istore-1,store_limit), min(i, store_limit), G)
-        Delta = Delta - C @ ( C.T @ Delta ) # optional?
+        Delta = -BG(istore, nstore, G)
+        Delta = Delta - C @ ( C.T @ Delta ) # this may improve numerical stability
 
         # Delta is N-by-L
         U, Sigma, VT = np.linalg.svd(Delta, full_matrices=False)
-        V = VT.T
-        df = lambda a: np.sum( dE( rotate(C, U, Sigma, V, a) ) \
-                * ( ( C @ V * (-Sigma*np.sin(a*Sigma)) + U * (Sigma*np.cos(a*Sigma)) ) @ V.T ) )
-        if df(0) > 0:
-            Delta = -Delta
-            V = -V
-            df = lambda a: np.sum( dE( rotate(C, U, Sigma, V, a) ) \
-                    * ( ( C @ V * (-Sigma*np.sin(a*Sigma)) + U * (Sigma*np.cos(a*Sigma)) ) @ V.T ) )
 
-        f = lambda a: E( rotate(C, U, Sigma, V, a) )
+        # make sure the search direction is descent
+        df0 = np.sum(dE(C)*Delta)
+        if df0 > 0:
+            Delta = -Delta
+            VT = -VT
+
+        df = lambda a: np.sum( dE( rotate(C, U, Sigma, VT, a) ) \
+                * ( ( C @ VT.T * (-Sigma*np.sin(a*Sigma)) + U * (Sigma*np.cos(a*Sigma)) ) @ VT ) )
+
+        f = lambda a: E( rotate(C, U, Sigma, VT, a) )
 
         # find a step size that satisfies the strong Wolfe conditions
         alpha, ls_flag = linesearch(f, df, alpha0=alpha, wolfe1=wolfe1, wolfe2=wolfe2)
 
+        if ls_flag != 0:
+            if restart_count == max_restart:
+                print('lgdm reached maximum number of restart attempts.')
+                return gen_return(1, i)
+
+            # restart if line search failed
+            S[:,:] = 0
+            Y[:,:] = 0
+            YS[:] = 0
+            UU[:,:,:] = 0
+            MM[:,:,:] = 0
+            istore = -1
+            nstore = 0
+            B0_diag[:] = 1
+
+            restart_count += 1
+            iter_hist[i,:] = np.array([np.NaN, np.NaN, np.NaN])
+            
+            continue
+
+        # update storage index
+        nstore = min(store_limit, nstore+1)
+        istore = np.mod(istore+1, store_limit)
+
         # matrices used in parallel transport
-        M = -C @ V * np.sin(Sigma*alpha) + U * (np.cos(Sigma*alpha)-1)
+        M = -C @ VT.T * np.sin(Sigma*alpha) + U * (np.cos(Sigma*alpha)-1)
         UU[:,:,istore] = U
         MM[:,:,istore] = M
 
         # update coordinate
-        C_new = rotate(C, U, Sigma, V, alpha)
+        C_new = rotate(C, U, Sigma, VT, alpha)
 
         # in normal BFGS we have s = alpha*p where p is the search direction
         # here p corresponds to Delta, but Delta is define with respect to the
@@ -165,9 +201,10 @@ def lgdm(E, dE, C0, conv_thr=1e-6, max_iter=1000, store_limit=15, wolfe1=0.2, wo
 
         if err < conv_thr:
             print('convergence achieved!')
-            iter_hist = np.resize(iter_hist, (i+1,3))
-            return C, 0, iter_hist
+            return gen_return(0, i+1)
 
     print('lgdm failed to converge within %4i iterations' %(max_iter))
-    return C, 1, iter_hist
+
+    return gen_return(1, max_iter)
+
 

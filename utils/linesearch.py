@@ -1,6 +1,6 @@
 import numpy as np
 
-def linesearch(f, df, alpha0=1.0, wolfe1=0.1, wolfe2=0.9, alpha_min = 1e-6, alpha_max=1e6, l=2.0):
+def linesearch(f, df, alpha0=1.0, wolfe1=0.1, wolfe2=0.9, alpha_min=1e-6, alpha_max=1e6, l=2.0):
     # alpha[i] = 0                   (i=0)
     #          = alpha0 * l**(i-1)   (i>0)
     #
@@ -36,7 +36,7 @@ def linesearch(f, df, alpha0=1.0, wolfe1=0.1, wolfe2=0.9, alpha_min = 1e-6, alph
         # |alpha_low-alpha_high| / 2**max_iter_zoom <= alpha_min
         # |alpha_low-alpha_high| / 2**(max_iter_zoom-1) > alpha_min
         # log2(|alpha_low-alpha_high|/alpha_min) <= N < 1+log2(|alpha_low-alpha_high|/alpha_min)
-        max_iter_zoom = round(np.ceil(np.log2(abs(alpha_high-alpha_low)/alpha_min)))
+        max_iter_zoom = max(1, round(np.ceil(np.log2(abs(alpha_high-alpha_low)/alpha_min))) )
 
         for iter in range(0, max_iter_zoom):
             alpha_star = 0.5*(alpha_low+alpha_high)

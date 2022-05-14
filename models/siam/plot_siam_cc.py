@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import h5py
 
 
-fh = h5py.File('siam_cc_unsym.h5', 'r')
+fh = h5py.File('ldos_siam_cc.h5', 'r')
 
 freqs_cc = np.asarray(fh['freqs_cc'])
 ldos_cc = np.asarray(fh['ldos_cc'])

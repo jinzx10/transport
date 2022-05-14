@@ -2,16 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py, time, sys
 
-from mpi4py import MPI
-from bath_disc import *
-
 from pyscf import gto, ao2mo, cc, scf, dft
 from fcdmft.solver import scf_mu
 
-
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-nprocs = comm.Get_size()
+from utils.bath_disc import *
 
 ##############################################
 # test case: single-impurity Anderson model
@@ -43,32 +37,8 @@ def gen_log_grid(w0, w, l, num):
     else:
         return grid
 
-def gen_siam_mf(on_site, Gamma, U, mu, wl, wh, nbath, log_disc_base):
+def gen_siam_mf(on_site, Gamma, U, mu, grid):
 
-    # distance to mu
-    #wl0 = mu - wl
-    #wh0 = wh - mu
-    #
-    ## number of energies above/below the Fermi level
-    #dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
-    #nl = nbath//2 - dif
-    #nh = nbath - nl
-
-    #grid = np.concatenate((gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
-    #        gen_log_grid(mu, wh, log_disc_base, nh)))
-    
-    # 2/3 coarse bath states
-    # 1/3 fine bath states near mu
-    nbath_coarse = round(nbath/3) # one side
-    nbath_fine = nbath - nbath_coarse*2
-    w = 0.05
-
-    grid = np.concatenate( (\
-            np.linspace(wl,mu-w-0.01,nbath_coarse), \
-            np.linspace(-w,w,nbath_fine), \
-            np.linspace(w+0.01,wh,nbath_coarse) ) )
-    
-    print('grid = ', grid)
 
     nbath = len(grid) - 1
     nemb = nbath + 1
@@ -108,14 +78,46 @@ hyb_const = 0.2
 U = 5.0
 on_site = -2.0
 mu = 0.5
-siam_mf = gen_siam_mf(on_site, hyb_const, U, mu=mu, wl=-5.0, wh=5.0, nbath=100, log_disc_base=1.2)
 
-if rank == 0:
-    siam_mf.kernel()
+#---------------- generate grid for bath --------------------
 
-siam_mf.mo_occ = comm.bcast(siam_mf.mo_occ, root=0)
-siam_mf.mo_energy = comm.bcast(siam_mf.mo_energy, root=0)
-siam_mf.mo_coeff = comm.bcast(siam_mf.mo_coeff, root=0)
+# log grid
+# distance to mu
+#wl0 = mu - wl
+#wh0 = wh - mu
+#
+## number of energies above/below the Fermi level
+#dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
+#nl = nbath//2 - dif
+#nh = nbath - nl
+
+#grid = np.concatenate((gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
+#        gen_log_grid(mu, wh, log_disc_base, nh)))
+
+# linear grid
+wl = -5.0
+wh = 5.0
+nbath = 20
+# 2/3 coarse bath states
+# 1/3 fine bath states near mu
+nbath_coarse = round(nbath/3) # one side
+nbath_fine = nbath - nbath_coarse*2
+
+# energy windows for fine bath states (2*w total)
+w = 0.05
+
+grid = np.concatenate( (\
+        np.linspace(wl,mu-w-0.01,nbath_coarse), \
+        np.linspace(-w,w,nbath_fine), \
+        np.linspace(w+0.01,wh,nbath_coarse) ) )
+    
+print('grid = ', grid)
+
+#########################################################
+
+siam_mf = gen_siam_mf(on_site, hyb_const, U, mu, grid)
+
+siam_mf.kernel()
 
 fock = siam_mf.get_fock()
 
@@ -143,38 +145,39 @@ siam_cc.verbose = 4
 siam_cc.iterative_damping = 0.7
 siam_cc.frozen = 0
 
-if rank == 0:
-    siam_cc.kernel()
-    siam_cc.solve_lambda()
-
-siam_cc.t1 = comm.bcast(siam_cc.t1, root=0)
-siam_cc.t2 = comm.bcast(siam_cc.t2, root=0)
-siam_cc.l1 = comm.bcast(siam_cc.l1, root=0)
-siam_cc.l2 = comm.bcast(siam_cc.l2, root=0)
+siam_cc.kernel()
+siam_cc.solve_lambda()
 
 from fcdmft.solver import mpiccgf as ccgf
 
-'''
-# grid to compute LDoS
-nw1 = 50
-freqs_cc1 = np.linspace(-6,-0.5,nw1)
-delta_cc1 = 0.1*np.ones(nw1)
+#---------------- grid to compute LDoS ------------------
+wl = -6
+wh = 6
 
-nw2 = 50
-freqs_cc2 = np.linspace(-0.5,-0.05,nw2)
-delta_cc2 = 0.03*np.ones(nw2)
+delta_cc1 = 0.1
+nw1 = 2*round((mu-0.5-wl)/delta_cc1)
+freqs_cc1 = np.linspace(-6,mu-0.5,nw1)
+delta_cc1 = delta_cc1*np.ones(nw1)
 
-nw3 = 50
-freqs_cc3 = np.linspace(-0.05,0.05,nw3)
-delta_cc3 = 0.005*np.ones(nw3)
+delta_cc2 = 0.05
+nw2 = 2*round(0.45/delta_cc2)
+freqs_cc2 = np.linspace(mu-0.45,mu-0.05,nw2)
+delta_cc2 = delta_cc2*np.ones(nw2)
 
-nw4 = 50
-freqs_cc4 = np.linspace(0.05,0.5,nw4)
-delta_cc4 = 0.02*np.ones(nw4)
+delta_cc3 = 0.01
+nw3 = 2*round(0.1/delta_cc3)
+freqs_cc3 = np.linspace(mu-0.05,mu+0.05,nw3)
+delta_cc3 = delta_cc3*np.ones(nw3)
 
-nw5 = 50
-freqs_cc5 = np.linspace(0.5,6,nw5)
-delta_cc5 = 0.1*np.ones(nw5)
+delta_cc4 = 0.05
+nw4 = 2*round(0.45/delta_cc4)
+freqs_cc4 = np.linspace(mu+0.05,mu+0.5,nw4)
+delta_cc4 = delta_cc4*np.ones(nw4)
+
+delta_cc5 = 0.1
+nw5 = 2*round((6-mu-0.5)/delta_cc5)
+freqs_cc5 = np.linspace(mu+0.5,6,nw5)
+delta_cc5 = delta_cc5*np.ones(nw5)
 
 freqs_cc = np.concatenate((freqs_cc1,freqs_cc2,freqs_cc3,freqs_cc4,freqs_cc5))
 delta_cc = np.concatenate((delta_cc1,delta_cc2,delta_cc3,delta_cc4,delta_cc5))
@@ -198,15 +201,14 @@ for iw in range(nw):
     gf_tot = g_ip + g_ea
     ldos_cc[iw] = -1./np.pi*gf_tot[0,0,0].imag
 
+
 '''
-
-
 wl_cc = -6
 wh_cc = 6
-nw_cc = 500
+nw_cc = 600
 freqs_cc = np.linspace(wl_cc, wh_cc, nw_cc)
-gmres_tol = 1e-4
-eta = 0.05
+gmres_tol = 1e-3
+eta = 0.1
 
 ao_orbs = range(1)
 
@@ -216,42 +218,13 @@ g_ea = gf.eaccsd_ao(ao_orbs, freqs_cc, siam_mf.mo_coeff, eta)
 gf = g_ip + g_ea
 
 ldos_cc = -1./np.pi*gf[0,0,:].imag
+'''
 
-
-
-fh = h5py.File('siam_cc_unsym.h5', 'w')
+fh = h5py.File('ldos_siam_cc.h5', 'w')
 fh['freqs_mf'] = freqs_mf
 fh['ldos_mf'] = ldos_mf
 fh['freqs_cc'] = freqs_cc
 fh['ldos_cc'] = ldos_cc
+fh['mu'] = mu
 fh.close()
-
-#wl_cc = -6
-#wh_cc = 6
-#nw_cc = 200
-#freqs_cc2 = np.linspace(wl_cc, wh_cc, nw_cc)
-#gmres_tol = 1e-3
-#eta = 0.2
-#
-#ao_orbs = range(1)
-#
-#gf = ccgf.CCGF(siam_cc, tol=gmres_tol)
-#g_ip = gf.ipccsd_ao(ao_orbs, freqs_cc2.conj(), siam_mf.mo_coeff, eta).conj()
-#g_ea = gf.eaccsd_ao(ao_orbs, freqs_cc2, siam_mf.mo_coeff, eta)
-#gf = g_ip + g_ea
-#
-#ldos_cc2 = -1./np.pi*gf[0,0,:].imag
-#ldos_cc_tot = np.concatenate((ldos_cc, ldos_cc2))
-#freqs_cc_tot = np.concatenate((freqs_cc, freqs_cc2))
-#
-#idx = np.argsort(freqs_cc_tot)
-#freqs_cc_tot = freqs_cc_tot[idx]
-#ldos_cc_tot = ldos_cc_tot[idx]
-#
-#dfreqs = freqs_cc[1:] - freqs_cc[0:-1]
-#print('integrated LDoS = ', np.sum(0.5*(ldos_cc[0:-1]+ldos_cc[1:])*dfreqs))
-
-#plt.plot(freqs_mf, ldos_mf)
-#plt.plot(freqs_cc, ldos_cc)
-#plt.show()
 
