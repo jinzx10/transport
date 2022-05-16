@@ -16,32 +16,23 @@ from pyscf.scf.hf import eig as eiggen
 #                       basis
 ############################################################
 Co_basis = 'def2-svp'
-
-
 Cu_basis = 'def2-svp-bracket'
-
 
 ############################################################
 #           directory for saving/loading data
 ############################################################
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', default = 'data', type = str)
-
 args = parser.parse_args()
 
-if args.datadir is None:
-    datadir = 'Co_' + Co_basis + '_Cu_' + Cu_basis + '/'
-else:
-    datadir = args.datadir + '/'
-
-print('data directory:', datadir)
+datadir = args.datadir + '/'
+print('data will be saved to:', datadir)
 
 if not os.path.exists(datadir):
     os.mkdir(datadir)
 
-
 ############################################################
-#               low-level mean-field method
+#                   mean-field method
 ############################################################
 # This is the method used to generate the density matrix;
 # The Fock matrix for building the impurity Hamiltonian
@@ -66,15 +57,15 @@ else:
     method_label += 'hf'
 
 # scf solver & addons
-# if use_smearing == True, use Fermi smearing
-# if False, the scf will use newton solver to help convergence
+# if use_smearing, use Fermi smearing
+# if False, scf will use newton solver to help convergence
 use_smearing = USE_SMEARING
 smearing_sigma = SMEARING_SIGMA
 
 if use_smearing:
-    method_label += '_smearing' + str(smearing_sigma)
+    solver_label = 'smearing' + str(smearing_sigma)
 else:
-    method_label += '_newton'
+    solver_label = 'newton'
 
 ############################################################
 #                       build cell
@@ -94,7 +85,8 @@ r = RIGHT
 # Cu atomic spacing in the lead
 a = SPACING
 
-cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
+cell_label = 'Co_' + Co_basis + '_Cu' + str(nat_Cu) + '_' + Cu_basis \
+        + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 
 if os.path.isfile(cell_fname):
@@ -142,11 +134,12 @@ kpts = cell.make_kpts(kmesh)
 Lat = lattice.Lattice(cell, kmesh)
 nao = Lat.nao
 nkpts = Lat.nkpts
+k_label = 'k' + str(kmesh[0]) + 'x' + str(kmesh[2]) + 'x' + str(kmesh[2])
 
 ############################################################
 #               density fitting
 ############################################################
-gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
+gdf_fname = datadir + '/cderi_' + cell_label + '_' + k_label + '.h5'
 
 gdf = df.GDF(cell, kpts)
 
@@ -175,7 +168,7 @@ else:
     else:
         kmf = scf.KUHF(cell, kpts).density_fit()
 
-mf_fname = datadir + '/' + cell_label + '_' + method_label + '.chk'
+mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + solver_label + '_' + k_label + '.chk'
 
 kmf.with_df = gdf
 
@@ -190,7 +183,7 @@ if os.path.isfile(mf_fname):
     kmf.__dict__.update( chkfile.load(mf_fname, 'scf') )
     print('mean field data loaded!')
     kmf.conv_tol = 1e-10
-    kmf.max_cycle = 300
+    kmf.max_cycle = 50
     kmf.kernel()
 else:
     kmf.chkfile = mf_fname
@@ -213,45 +206,24 @@ else:
 #################################
 #       sanity check begin
 #################################
-S_ao_ao = kmf.get_ovlp()
-
-hcore_ao = kmf.get_hcore()
-hcore_ao = hcore_ao[0]
-
-JK_ao = kmf.get_veff()
-JK_ao = JK_ao[0]
-
-DM_ao = kmf.make_rdm1() # DM_ao is real!
-DM_ao = DM_ao[0]
-
-# check hcore_ao and JK_ao indeed generate DM_ao
-fock = hcore_ao + JK_ao
-
-e, v = eiggen(fock, S_ao_ao[0])
-
-
-mo_energy = kmf.mo_energy
-mo_energy = mo_energy[0]
-print('sanity: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mo_energy-e))
-
-nocc = (27+nat_Cu*29) // 2
-print('sanity nocc = ', nocc)
-
-mo_occ = kmf.mo_occ
-mo_occ = mo_occ[0]
-
-dm_fock = (v * mo_occ) @ v.T
-
-print('sanity sum(mo_occ) = ', np.sum(mo_occ))
-
-print('sanity: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao))
-
-# verify DM_ao indeed generates JK_ao
-DM_ao = DM_ao[np.newaxis,...]
-JK_tmp = kmf.get_veff(dm=DM_ao)
-print('sanity JK diff = ', np.linalg.norm(JK_tmp[0]-JK_ao))
-
-exit()
+if do_restricted:
+    S_ao_ao = kmf.get_ovlp()
+    hcore_ao = kmf.get_hcore()
+    JK_ao = kmf.get_veff()
+    
+    e, v = eiggen(hcore_ao[0]+JK_ao[0], S_ao_ao[0])
+    
+    mo_energy = kmf.mo_energy
+    print('sanity check: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mo_energy[0]-e))
+    
+    mo_occ = kmf.mo_occ
+    nocc = (27+29*nat_Cu) // 2
+    print('sanity check: sum(mo_occ) = ', np.sum(mo_occ), '   nocc = ', nocc)
+    
+    if nkpts == 1:
+        DM_ao = kmf.make_rdm1()
+        dm_fock = (v * mo_occ[0]) @ v.T
+        print('sanity check: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao[0]))
 
 #################################
 #       sanity check end
@@ -409,10 +381,10 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = True
+plot_orb = False
 
 if plot_orb:
-    plotdir = datadir + '/plot_' + cell_label + '_' + method_label
+    plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + solver_label + '_' + k_label + '.chk'
     if not os.path.exists(plotdir):
         os.mkdir(plotdir)
 
@@ -422,70 +394,78 @@ if plot_orb:
 ############################################################
 #           Quantities in LO (IAO) basis
 ############################################################
-S_ao_ao = kmf.get_ovlp()
-print('S_ao_ao.shape = ', S_ao_ao.shape)
+
+data_fname = datadir + '/data_' + cell_label + '_' + method_label + '_' + solver_label + '_' + k_label + '.h5'
+fh = h5py.File(data_fname, 'w')
 
 
-fname = datadir + '/C_ao_lo_' + cell_label + '_' + method_label + '.h5'
-f = h5py.File(fname, 'w')
-f['C_ao_lo'] = C_ao_lo
-f['C_ao_lo_Co'] = C_ao_lo_Co
-f['S_ao_ao'] = S_ao_ao
-f.close()
+S_ao_ao = np.asarray(kmf.get_ovlp())
+DM_ao = np.asarray(kmf.make_rdm1())
+hcore_ao = np.asarray(kmf.get_hcore())
+JK_ao = np.asarray(kmf.get_veff())
 
+fh['S_ao_ao'] = S_ao_ao
+fh['DM_ao'] = DM_ao
+fh['hcore_ao'] = hcore_ao
+fh['JK_ao'] = JK_ao
 
-# get density matrix in IAO basis
-DM_ao = kmf.make_rdm1() # DM_ao is real!
+fh['C_ao_lo'] = C_ao_lo
+fh['C_ao_lo_Co'] = C_ao_lo_Co
+fh['C_ao_lo_tot'] = C_ao_lo_tot
 
+# add an additional axis for convenience (but this will not be stored)
 if len(DM_ao.shape) == 3:
     DM_ao = DM_ao[np.newaxis,...]
 
-DM_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=DM_ao.dtype)
-DM_lo_Co = np.zeros((spin,nkpts,nao_Co,nao_Co),dtype=DM_ao.dtype)
+# density matrix in LO basis
+DM_lo     = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt), dtype=DM_ao.dtype)
+DM_lo_Co  = np.zeros((spin,nkpts,nao_Co    ,nao_Co    ), dtype=DM_ao.dtype)
+DM_lo_tot = np.zeros((spin,nkpts,nao       ,nao       ), dtype=DM_ao.dtype)
 
 for s in range(spin):
     for ik in range(nkpts):
         # C^\dagger*S*C=I
-        Cinv = np.dot(C_ao_lo[s,ik].T.conj(),S_ao_ao[ik])
-        DM_lo[s,ik] = np.dot(np.dot(Cinv, DM_ao[s,ik]), Cinv.T.conj())
+        Cinv = C_ao_lo[s,ik].T.conj() @ S_ao_ao[ik]
+        DM_lo[s,ik] = Cinv @ DM_ao[s,ik] @ Cinv.T.conj()
     
-        Cinv_Co = np.dot(C_ao_lo_Co[s,ik].T.conj(),S_ao_ao[ik])
-        DM_lo_Co[s,ik] = np.dot(np.dot(Cinv_Co, DM_ao[s,ik]), Cinv_Co.T.conj())
+        Cinv_Co = C_ao_lo_Co[s,ik].T.conj() @ S_ao_ao[ik]
+        DM_lo_Co[s,ik] = Cinv_Co @ DM_ao[s,ik] @ Cinv_Co.T.conj()
 
+        Cinv_tot = C_ao_lo_tot[s,ik].T.conj() @ S_ao_ao[ik]
+        DM_lo_tot = Cinv_tot @ DM_ao[s,ik] @ Cinv_tot.T.conj()
+
+fh['DM_lo'] = DM_lo
+fh['DM_lo_Co'] = DM_lo_Co
+fh['DM_lo_tot'] = DM_lo_tot
+
+##########################
+# sanity check starts
+##########################
 nelec_Co_tmp = 0
 for s in range(spin):
     nelec_lo = np.trace(DM_lo[s].sum(axis=0)/nkpts)
     print ('Nelec (core excluded)', nelec_lo.real)
     
     nelec_lo_Co = np.trace(DM_lo_Co[s].sum(axis=0)/nkpts)
-    print ('Nelec on Co', nelec_lo_Co.real)
+    print ('Nelec on Co (core excluded)', nelec_lo_Co.real)
 
     nelec_Co_tmp += nelec_lo_Co
 
 print('total number of electrons on Co = ', nelec_Co_tmp)
-
-fn = datadir + '/DM_lo_' + cell_label + '_' + method_label + '.h5'
-f = h5py.File(fn, 'w')
-f['DM_lo'] = DM_lo
-f['DM_lo_Co'] = DM_lo_Co
-f.close()
+##########################
+# sanity check ends
+##########################
 
 # get 4-index ERI
 #eri_lo = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo, feri=gdf_fname)
 eri_lo_Co = eri_transform.get_unit_eri_fast(cell, gdf, C_ao_lo=C_ao_lo_Co, feri=gdf_fname)
 
-fn = datadir + '/eri_lo_' + cell_label + '_' + method_label + '.h5'
-f = h5py.File(fn, 'w')
-#f['eri_lo'] = eri_lo.real
-f['eri_lo_Co'] = eri_lo_Co.real
-f.close()
+fh['eri_lo_Co'] = eri_lo_Co.real
 
 assert(np.max(np.abs(eri_lo_Co.imag))<1e-8)
 
-# get one-electron integrals
-hcore_ao = kmf.get_hcore() # hcore_ao and JK_ao are all real!
-print('hcore_ao.shape = ', hcore_ao.shape)
-JK_ao = kmf.get_veff()
+
+# get hcore & JK in LO basis
 if len(JK_ao.shape) == 3:
     JK_ao = JK_ao[np.newaxis, ...]
 
@@ -499,24 +479,20 @@ JK_lo_Co = np.zeros((spin,nkpts,nao_Co    ,nao_Co    ),dtype=JK_ao.dtype)
 # h^{LO} = \dg{C} h^{AO} C
 for s in range(spin):
     for ik in range(nkpts):
-        hcore_lo[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), hcore_ao[ik]), C_ao_lo[s,ik])
-        hcore_lo_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), hcore_ao[ik]), C_ao_lo_Co[s,ik])
+        hcore_lo[s,ik] = C_ao_lo[s,ik].T.conj() @ hcore_ao[ik] @ C_ao_lo[s,ik]
+        hcore_lo_Co[s,ik] = C_ao_lo_Co[s,ik].T.conj() @ hcore_ao[ik] @ C_ao_lo_Co[s,ik]
     
-        JK_lo[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo[s,ik])
-        JK_lo_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), JK_ao[s,ik]), C_ao_lo_Co[s,ik])
+        JK_lo[s,ik] = C_ao_lo[s,ik].T.conj() @ JK_ao[s,ik] @ C_ao_lo[s,ik]
+        JK_lo_Co[s,ik] = C_ao_lo_Co[s,ik].T.conj() @ JK_ao[s,ik] @ C_ao_lo_Co[s,ik]
 
-
-fn = datadir + '/hcore_JK_lo_' + cell_label + '_' + method_label + '.h5'
-
-f = h5py.File(fn, 'w')
-f['hcore_lo'] = hcore_lo
-f['hcore_lo_Co'] = hcore_lo_Co
-f['JK_lo'] = JK_lo
-f['JK_lo_Co'] = JK_lo_Co
-f.close()
+fh['hcore_lo'] = hcore_lo
+fh['hcore_lo_Co'] = hcore_lo_Co
+fh['JK_lo'] = JK_lo
+fh['JK_lo_Co'] = JK_lo_Co
 
 # if using DFT, get HF JK term using DFT density
 if use_dft:
+
     if do_restricted:
         kmf_hf = scf.KRHF(cell, kpts, exxdiv='ewald')
     else:
@@ -524,8 +500,7 @@ if use_dft:
     kmf_hf.with_df = gdf
     kmf_hf.with_df._cderi = gdf_fname
     kmf_hf.max_cycle = 0
-    print('DM_ao.shape = ', DM_ao.shape)
-    print('C_ao_lo.shape = ', C_ao_lo.shape)
+
     if do_restricted:
         JK_ao_hf = kmf_hf.get_veff(dm_kpts=DM_ao[0])
         JK_ao_hf = JK_ao_hf[np.newaxis,...]
@@ -533,16 +508,66 @@ if use_dft:
         JK_ao_hf = kmf_hf.get_veff(dm_kpts=DM_ao)
     
     JK_lo_hf    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_lo.dtype)
-    JK_lo_hf_Co = np.zeros((spin,nkpts,nao_Co,nao_Co),dtype=JK_lo.dtype)
+    JK_lo_hf_Co = np.zeros((spin,nkpts,nao_Co    ,nao_Co    ),dtype=JK_lo.dtype)
+
     for s in range(spin):
         for ik in range(nkpts):
-            JK_lo_hf[s,ik] = np.dot(np.dot(C_ao_lo[s,ik].T.conj(), JK_ao_hf[s,ik]), C_ao_lo[s,ik])
-            JK_lo_hf_Co[s,ik] = np.dot(np.dot(C_ao_lo_Co[s,ik].T.conj(), JK_ao_hf[s,ik]), C_ao_lo_Co[s,ik])
+            JK_lo_hf[s,ik] = C_ao_lo[s,ik].T.conj() @ JK_ao_hf[s,ik] @ C_ao_lo[s,ik]
+            JK_lo_hf_Co[s,ik] = C_ao_lo_Co[s,ik].T.conj() @ JK_ao_hf[s,ik] @ C_ao_lo_Co[s,ik]
     
-    fn = datadir + '/hcore_JK_lo_' + cell_label + '_' + method_label + '.h5'
-    f = h5py.File(fn, 'a')
-    f['JK_lo_hf'] = JK_lo_hf
-    f['JK_lo_hf_Co'] = JK_lo_hf_Co
-    f.close()
+    fh['JK_lo_hf'] = JK_lo_hf
+    fh['JK_lo_hf_Co'] = JK_lo_hf_Co
 
+fh.close()
+
+#*********************************** 
+#           data summary
+#*********************************** 
+
+#--------- data in AO basis --------
+# S_ao_ao
+# DM_ao
+# hcore_ao, JK_ao
+
+#--------- AO-to-LO transformation matrix --------
+# C_ao_lo, C_ao_lo_Co, C_ao_lo_tot
+
+#--------- data in LO basis ----------
+# DM_lo, DM_lo_Co, DM_lo_tot
+# eri_lo_Co
+# hcore_lo, hcore_lo_Co
+# JK_lo, JK_lo_Co
+
+#--------- HF JK with DFT density ----------
+# JK_lo_hf, JK_lo_hf_Co
+
+#######################################
+# sanity check: matrix size in data
+#######################################
+fh = h5py.File(data_fname, 'r')
+
+print('S_ao_ao.shape = ', np.asarray(fh['S_ao_ao']).shape)
+print('DM_ao.shape = ', np.asarray(fh['DM_ao']).shape)
+print('hcore_ao.shape = ', np.asarray(fh['hcore_ao']).shape)
+print('JK_ao.shape = ', np.asarray(fh['JK_ao']).shape)
+
+print('C_ao_lo.shape = ', np.asarray(fh['C_ao_lo']).shape)
+print('C_ao_lo_Co.shape = ', np.asarray(fh['C_ao_lo_Co']).shape)
+print('C_ao_lo_tot.shape = ', np.asarray(fh['C_ao_lo_tot']).shape)
+
+print('DM_lo.shape = ', np.asarray(fh['DM_lo']).shape)
+print('DM_lo_Co.shape = ', np.asarray(fh['DM_lo_Co']).shape)
+print('DM_lo_tot.shape = ', np.asarray(fh['DM_lo_tot']).shape)
+
+print('eri_lo_Co.shape = ', np.asarray(fh['eri_lo_Co']).shape)
+
+print('hcore_lo.shape = ', np.asarray(fh['hcore_lo']).shape)
+print('hcore_lo_Co.shape = ', np.asarray(fh['hcore_lo_Co']).shape)
+print('JK_lo.shape = ', np.asarray(fh['JK_lo']).shape)
+print('JK_lo_Co.shape = ', np.asarray(fh['JK_lo_Co']).shape)
+
+print('JK_lo_hf.shape = ', np.asarray(fh['JK_lo_hf']).shape)
+print('JK_lo_hf_Co.shape = ', np.asarray(fh['JK_lo_hf_Co']).shape)
+
+fh.close()
 

@@ -5,8 +5,6 @@ from mpi4py import MPI
 
 from fcdmft.solver import scf_mu
 
-from surface_green import *
-from bath_disc import *
 
 from matplotlib import colors
 
@@ -17,9 +15,42 @@ from pyscf.pbc import df as pbcdf
 from pyscf.pbc.lib import chkfile
 
 from pyscf.pbc import dft as pbcdft
-from diis import diis
+
+from utils.diis import diis
+from utils.surface_green import *
+from utils.bath_disc import *
 
 from pyscf.scf.hf import eig as eiggen
+
+#-------------------contact info---------------------------
+datadir = 'data/'
+
+Co_basis = 'def2-svp'
+Cu_basis = 'def2-svp-bracket'
+
+nat_Cu = 9
+l = 2.7
+r = 2.7
+a = 2.55
+
+cell_label = 'Co_' + Co_basis + '_Cu' + str(nat_Cu) + '_' + Cu_basis \
+        + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
+
+cell_fname = datadir + '/cell_' + cell_label + '.chk'
+
+kmesh = [1,1,1]
+kpts = np.array([[0,0,0]])
+k_label = 'k' + str(kmesh[0]) + 'x' + str(kmesh[2]) + 'x' + str(kmesh[2])
+
+gdf_fname = datadir + '/cderi_' + cell_label + '_' + k_label + '.h5'
+
+xcfun = 'pbe0'
+
+method_label = 'rks_' + xcfun
+solver_label = 'newton'
+
+data_fname = datadir + '/data_' + cell_label + '_' + method_label + '_' + solver_label + '_' + k_label + '.h5'
+
 
 class RHF2(scf.hf.RHF):
 
@@ -27,33 +58,23 @@ class RHF2(scf.hf.RHF):
 
     def __init__(self, mol, mu):
 
-        nat_Cu = 9
-        l = 2.7
-        r = 2.7
-        a = 2.55
-        datadir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
 
-        cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
-        cell_fname = datadir + '/cell_' + cell_label + '.chk'
         self._cell = chkfile.load_cell(cell_fname)
 
         self.mu = mu
         scf.hf.RHF.__init__(self,mol)
 
-        gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
-
-        kmesh = [1,1,1]
-        kpts = self._cell.make_kpts(kmesh)
         self._gdf = pbcdf.GDF(self._cell, kpts)
         self._gdf._cderi = gdf_fname
 
         self._kmf = pbcdft.KRKS(self._cell, kpts).density_fit()
-        self._kmf.xc = 'pbe'
+        self._kmf.xc = xcfun
         self._kmf.with_df = self._gdf
 
-        fname = datadir + '/CoCu_set_ham_test.h5'
-        fh = h5py.File(fname, 'r')
-        self._C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])
+
+        # file that stores extra data for sanity check
+        fh = h5py.File(data_fname, 'r')
+        self._C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])[0,0]
         self._DM_lo_tot = np.asarray(fh['DM_lo_tot'])
         self._S_ao_ao = np.asarray(fh['S_ao_ao'])
         fh.close()
@@ -69,6 +90,9 @@ class RHF2(scf.hf.RHF):
         veff_lo_tmp = np.dot(np.dot(C.T.conj(), veff_ao_tmp), C)
         
         self._veff_ref = veff_lo_tmp[9:31,9:31]
+
+        print('veff_ref.shape =', self._veff_ref.shape)
+        print('RHF2 object initialized!')
 
     def get_occ(self, mo_energy=None, mo_coeff=None):
         mo_occ = np.zeros_like(mo_energy)
@@ -122,107 +146,6 @@ class RHF2(scf.hf.RHF):
         #return veff, veff_lo
         return veff
 
-'''
-
-class RKS2(dft.rks.RKS):
-
-    __doc__ = dft.rks.RKS.__doc__
-
-    def __init__(self, mol, mu):
-
-        nat_Cu = 9
-        l = 2.7
-        r = 2.7
-        a = 2.55
-        datadir = 'Co_def2-svp_Cu_def2-svp-bracket/'
-
-        cell_label = 'CoCu_' + str(nat_Cu) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
-        cell_fname = datadir + '/cell_' + cell_label + '.chk'
-        self._cell = chkfile.load_cell(cell_fname)
-
-        self.mu = mu
-        dft.rks.RKS.__init__(self,mol)
-
-        gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
-
-        kmesh = [1,1,1]
-        kpts = self._cell.make_kpts(kmesh)
-        self._gdf = pbcdf.GDF(self._cell, kpts)
-        self._gdf._cderi = gdf_fname
-
-        self._kmf = pbcdft.KRKS(self._cell, kpts).density_fit()
-        self._kmf.xc = 'pbe'
-        self._kmf.with_df = self._gdf
-
-        fname = datadir + '/imp_rks_check.h5'
-        fh = h5py.File(fname, 'r')
-        self._C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])
-        self._DM_lo_tot = np.asarray(fh['DM_lo_tot'])
-        self._S_ao_ao = np.asarray(fh['S_ao_ao'])
-        fh.close()
-
-    def get_occ(self, mo_energy=None, mo_coeff=None):
-        mo_occ = np.zeros_like(mo_energy)
-        mo_occ[mo_energy<=self.mu] = 2.0
-        return mo_occ
-
-
-    def get_veff(self, mol, dm, dm_last=0, vhf_last=0):
-        # Co def2-svp: core-9 val-6 virt-16
-
-        # given an embedding dm, extract the Co block
-        # Co val+virt has 22 orbitals
-        dm_imp = dm[:22, :22]
-
-        # DM in LO basis, all orbitals (core+val+virt)
-        dm_tot_lo = np.copy(self._DM_lo_tot)
-
-        # AO-to-LO transformation matrix (include all LO)
-        C = np.copy(self._C_ao_lo_tot)
-
-        # replace the Co val+virt block
-        dm_tot_lo[9:31,9:31] = dm_imp
-
-        # P^{AO} = C P^{LO} \dg{C}
-
-        # transform to AO basis
-        dm_tot_ao = C @ dm_tot_lo @ C.T.conj()
-
-        # self._kmf is a pbc scf, need an extra k axis
-        dm_tot_ao = dm_tot_ao[np.newaxis,...]
-
-        # compute veff
-        veff_ao = self._kmf.get_veff(dm=dm_tot_ao)
-
-        # now veff_ao is a tagged array
-        #vj = (veff_ao.vj)[0]
-        #vk = (veff_ao.vk)[0]
-        ecoul = veff_ao.ecoul
-        exc = veff_ao.exc
-        veff_ao = np.asarray(veff_ao)[0]
-
-        # transform to LO
-        veff_lo = np.dot(np.dot(C.T.conj(), veff_ao), C)
-        #vj_lo = np.dot(np.dot(C.T.conj(), vj), C)
-        #vk_lo = np.dot(np.dot(C.T.conj(), vk), C)
-
-        veff = np.zeros_like(dm)
-        #vj = np.zeros_like(dm)
-        #vk = np.zeros_like(dm)
-
-        # extract Co val+virt
-        veff[:22,:22] = veff_lo[9:31,9:31]
-        #vj[:22,:22] = vj[9:31,9:31]
-        #vk[:22,:22] = vk[9:31,9:31]
-
-        vxc = lib.tag_array(veff, ecoul=ecoul, exc=exc, vj=None, vk=None)
-        return vxc
-
-'''
-
-        
-
-
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -232,22 +155,11 @@ nprocs = comm.Get_size()
 #           read contact's mean-field data
 ############################################################
 
-contact_dir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
-
 if rank == 0:
-    print('reading contact\'s mean field data from', contact_dir)
-
-nat_Cu_contact = 9
-a = 2.55
-l = 2.7
-r = 2.7
-
-cell_label = 'CoCu_' + str(nat_Cu_contact) + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
-method_label = 'rks_pbe'
+    print('reading contact\'s mean field data from', datadir)
 
 #------------ read core Hamiltonian and DFT veff (built with DFT DM)  ------------
-fname = contact_dir + '/hcore_JK_lo_' + cell_label + '_' + method_label + '.h5'
-fh = h5py.File(fname, 'r')
+fh = h5py.File(data_fname, 'r')
 
 # Co atom block only
 hcore_lo_Co = np.asarray(fh['hcore_lo_Co'])
@@ -256,17 +168,11 @@ JK_lo_ks_Co = np.asarray(fh['JK_lo_Co'])
 # entire center region, Co + 9 Cu atoms
 hcore_lo_contact = np.asarray(fh['hcore_lo'])
 JK_lo_ks_contact = np.asarray(fh['JK_lo'])
-fh.close()
 
 #------------ read density matrix ------------
-fname = contact_dir + '/DM_lo_' + cell_label + '_' + method_label + '.h5'
-fh = h5py.File(fname, 'r')
 DM_lo_Co = np.asarray(fh['DM_lo_Co'])
-fh.close()
 
 #------------ read ERI ------------
-fname = contact_dir + '/eri_lo_' + cell_label + '_' + method_label + '.h5'
-fh = h5py.File(fname, 'r')
 eri_lo_Co = np.asarray(fh['eri_lo_Co'])
 fh.close()
 
@@ -351,43 +257,43 @@ if rank == 0:
 
 bath_cell_label = 'Cu_' + 'nat' + str(nat_Cu_lead) + '_a' + str(a)
 
-cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
-cell = chkfile.load_cell(cell_fname)
+bath_cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
+bath_cell = chkfile.load_cell(bath_cell_fname)
 
-kpts = [[0,0,0]]
+bath_kpts = np.array([[0,0,0]])
 
-gdf_fname = bath_dir + 'cderi_' + bath_cell_label + '.h5'
-gdf = pbcdf.GDF(cell, kpts)
-gdf._cderi = gdf_fname
+bath_gdf_fname = bath_dir + 'cderi_' + bath_cell_label + '.h5'
+bath_gdf = pbcdf.GDF(bath_cell, bath_kpts)
+bath_gdf._cderi = bath_gdf_fname
 
 if 'ks' in method_label:
-    kmf = pbcscf.KRKS(cell, kpts).density_fit()
-    kmf.xc = 'pbe'
+    bath_kmf = pbcscf.KRKS(bath_cell, bath_kpts).density_fit()
+    bath_kmf.xc = 'pbe'
     bath_method_label = 'rks'
 else:
-    kmf = pbcscf.KRHF(cell, kpts).density_fit()
+    bath_kmf = pbcscf.KRHF(bath_cell, bath_kpts).density_fit()
     bath_method_label = 'rhf'
 
-mf_fname = bath_dir + bath_cell_label + '_' + bath_method_label + '.chk'
+bath_mf_fname = bath_dir + bath_cell_label + '_' + bath_method_label + '.chk'
 
-kmf.with_df = gdf
-kmf.__dict__.update( chkfile.load(mf_fname, 'scf') )
+bath_kmf.with_df = bath_gdf
+bath_kmf.__dict__.update( chkfile.load(bath_mf_fname, 'scf') )
 
 ihomo = 29*nat_Cu_lead//2-1
 ilumo = 29*nat_Cu_lead//2
 
-E_Cu_homo = np.asarray(kmf.mo_energy)[0,ihomo]
-E_Cu_lumo = np.asarray(kmf.mo_energy)[0,ilumo]
+E_Cu_homo = np.asarray(bath_kmf.mo_energy)[0,ihomo]
+E_Cu_lumo = np.asarray(bath_kmf.mo_energy)[0,ilumo]
 
 if rank == 0:
-    print('ihomo = ', ihomo, '      occ = ', np.asarray(kmf.mo_occ)[0,ihomo], '      E = ', E_Cu_homo)
-    print('ilumo = ', ilumo, '      occ = ', np.asarray(kmf.mo_occ)[0,ilumo], '      E = ', E_Cu_lumo)
+    print('ihomo = ', ihomo, '      occ = ', np.asarray(bath_kmf.mo_occ)[0,ihomo], '      E = ', E_Cu_homo)
+    print('ilumo = ', ilumo, '      occ = ', np.asarray(bath_kmf.mo_occ)[0,ilumo], '      E = ', E_Cu_lumo)
 
 comm.Barrier()
 
 #------------ get H00 and H01 (for surface Green's function) ------------
-fname = bath_dir + '/hcore_JK_lo_' + bath_cell_label + '_' + bath_method_label + '.h5'
-fh = h5py.File(fname, 'r')
+bath_fname = bath_dir + '/hcore_JK_lo_' + bath_cell_label + '_' + bath_method_label + '.h5'
+fh = h5py.File(bath_fname, 'r')
 
 hcore_lo_lead = np.asarray(fh['hcore_lo'])
 JK_lo_lead = np.asarray(fh['JK_lo'])
@@ -432,30 +338,19 @@ DM_lo_Co = 1./nkpts * np.sum(DM_lo_Co, axis=1)
 # for DFT it is computed by taking the difference between veff with/without Co val+virt DM
 
 # build Co+9Cu cell & rks object
-nat_Cu = 9
-l = 2.7
-r = 2.7
-a = 2.55
-datadir = 'Co_def2-svp_Cu_def2-svp-bracket/backup'
 
-cell_fname = datadir + '/cell_' + cell_label + '.chk'
 cell = chkfile.load_cell(cell_fname)
 
-gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
-
-kmesh = [1,1,1]
-kpts = cell.make_kpts(kmesh)
 gdf = pbcdf.GDF(cell, kpts)
 gdf._cderi = gdf_fname
 
 kmf = pbcdft.KRKS(cell, kpts).density_fit()
-kmf.xc = 'pbe'
+kmf.xc = 'pbe0'
 kmf.with_df = gdf
 
 
-fname = datadir + '/CoCu_set_ham_test.h5'
-fh = h5py.File(fname, 'r')
-C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])
+fh = h5py.File(data_fname, 'r')
+C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])[0,0]
 DM_lo_tot = np.asarray(fh['DM_lo_tot'])
 S_ao_ao = np.asarray(fh['S_ao_ao'])
 DM_ao = np.asarray(fh['DM_ao'])
@@ -696,7 +591,7 @@ print('sanity check: fock_Co diff = ', np.linalg.norm(fock_Co_ref-fock_Co_test))
 
 
 veff_test = mf.get_veff(mol=mol,dm=dm0[0])
-JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao), C_ao_lo_tot)
+JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao[0]), C_ao_lo_tot)
 print('diff = ', np.linalg.norm(veff_test[0:22,0:22]+mf._veff_ref-JK_lo_tot[9:31,9:31]))
 
 veff_0 = mf.get_veff(mol=mol,dm=dm0[0])
@@ -719,7 +614,7 @@ def fock2fock(fock_in):
     return fock_out
 
 # for Commutator-DIIS
-smearing_sigma = 0.1
+smearing_sigma = 0.02
 chem_pot = -0.16
 def fock2fockcomm(fock_in):
     e,v = eiggen(fock_in, np.eye(nemb))
@@ -738,7 +633,7 @@ def fock2fockcomm(fock_in):
     return fock_out, comm
 
 
-flag, fock = diis(fock2fockcomm, fock_0, max_iter=300)
+fock, flag = diis(fock2fockcomm, fock_0, max_iter=300)
 
 if flag == 0:
     print('fock.shape = ', fock.shape)
