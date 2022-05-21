@@ -147,7 +147,7 @@ def gen_siam_mf(on_site, Gamma, U, mu, grid):
 
 hyb_const = 0.2
 U = 5.0
-on_site = -2.0
+on_site = -2.501
 mu = 0.0
 
 #---------------- generate grid for bath --------------------
@@ -170,19 +170,21 @@ nh = nbath - nl
 grid = np.concatenate((gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
         gen_log_grid(mu, wh, log_disc_base, nh)))
 
-## linear grid
-## 2/3 coarse bath states
-## 1/3 fine bath states near mu
-#nbath_coarse = round(nbath/3) # one side
-#nbath_fine = nbath - nbath_coarse*2
-#
-## energy windows for fine bath states (2*w total)
-#w = 0.05
-#
-#grid = np.concatenate( (\
-#        np.linspace(wl,mu-w-0.01,nbath_coarse), \
-#        np.linspace(-w,w,nbath_fine), \
-#        np.linspace(w+0.01,wh,nbath_coarse) ) )
+'''
+# linear grid
+# 2/3 coarse bath states
+# 1/3 fine bath states near mu
+nbath_coarse = round(nbath/3) # one side
+nbath_fine = nbath - nbath_coarse*2
+
+# energy windows for fine bath states (2*w total)
+w = 0.05
+
+grid = np.concatenate( (\
+        np.linspace(wl,mu-w-0.01,nbath_coarse), \
+        np.linspace(-w,w,nbath_fine), \
+        np.linspace(w+0.01,wh,nbath_coarse) ) )
+'''
     
 print('grid = ', grid)
 
@@ -261,11 +263,11 @@ for iw in range(nwa):
     gf_hf[iw,:,:] = mo_coeff @ gf_mo @ mo_coeff.T
     ldos_mf[iw] = -1./np.pi*gf_hf[iw,0,0].imag
 
-#plt.plot(all_freqs, ldos_mf)
-#plt.xlim([-6,6])
+plt.plot(all_freqs, ldos_mf)
+plt.xlim([all_freqs[0], all_freqs[-1]])
 #plt.ylim([-0.01,0.5])
-#plt.show()
-#exit()
+plt.show()
+exit()
 
 #########################################################
 #               DMRG impurity solver
@@ -383,8 +385,8 @@ print('number of NOs: ', n_no)
 
 # NOTE still do not understand scdm, but 'local' might be important!
 # use local = True for now
-#no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
-#no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
+no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
+no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
 no_coeff = np.concatenate((no_coeff_o, no_coeff_v), axis=1)
 no_coeff = comm.bcast(no_coeff, root=0)
 
@@ -424,8 +426,6 @@ if rank == 0:
     # NOTE dm_cas_no should be already a converged dm, so max_cycle=1 is enough
     #siam_mf_cas.max_cycle = 1
     siam_mf_cas.kernel(dm_cas_no)
-    print('cas mo energy = ', siam_mf_cas.mo_energy)
-    print('cas mo energy diff = ', siam_mf_cas.mo_energy[1:] - siam_mf_cas.mo_energy[:-1])
 comm.Barrier()
 
 siam_mf_cas.mo_occ = comm.bcast(siam_mf_cas.mo_occ, root=0)

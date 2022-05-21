@@ -73,13 +73,12 @@ def gen_siam_mf(on_site, Gamma, U, mu, grid):
     emb_mf.diis_space = 15
 
     return emb_mf
-    
 hyb_const = 0.2
 U = 5.0
 on_site = -2.0
-mu = 0.5
+mu = 0.0
 
-#---------------- generate grid for bath --------------------
+#---------------- generate grid for bath discretization --------------------
 
 # log grid
 # distance to mu
@@ -94,49 +93,109 @@ mu = 0.5
 #grid = np.concatenate((gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
 #        gen_log_grid(mu, wh, log_disc_base, nh)))
 
-# linear grid
-wl = -5.0
-wh = 5.0
-nbath = 20
-# 2/3 coarse bath states
-# 1/3 fine bath states near mu
-nbath_coarse = round(nbath/3) # one side
-nbath_fine = nbath - nbath_coarse*2
+# symmetric linear grid
+wlb = -5.0
+whb = 5.0
+nbath = 100
+# 2/5 coarse bath states
+# 2/5 fine bath states near mu
+# 1/5 ultrafine bath states near mu
+nbath_coarse = round(nbath/5) # one side
+nbath_fine = nbath_coarse
+nbath_ultrafine = nbath - nbath_fine*4
 
-# energy windows for fine bath states (2*w total)
-w = 0.05
+# energy windows for ultrafine bath states (one-sided width)
+wb = 0.05
+
+# second energy windows for fine bath states
+Wb = 0.5
 
 grid = np.concatenate( (\
-        np.linspace(wl,mu-w-0.01,nbath_coarse), \
-        np.linspace(-w,w,nbath_fine), \
-        np.linspace(w+0.01,wh,nbath_coarse) ) )
-    
+        np.linspace(wlb,mu-Wb,nbath_coarse+1), \
+        np.linspace(mu-Wb,mu-wb,nbath_fine+1), \
+        np.linspace(mu-wb,mu+wb,nbath_ultrafine), \
+        np.linspace(mu+wb,mu+Wb,nbath_fine+1), \
+        np.linspace(mu+Wb,whb,nbath_coarse+1) ) )
+
+grid = np.array(sorted(list(set(list(grid)))))
 print('grid = ', grid)
+print('dgrid = ', grid[1:]-grid[:-1])
 
 #########################################################
 
 siam_mf = gen_siam_mf(on_site, hyb_const, U, mu, grid)
-
 siam_mf.kernel()
 
-fock = siam_mf.get_fock()
+print('mf mo_energy = ', siam_mf.mo_energy)
+print('mf diff mo_energy = ', siam_mf.mo_energy[1:] - siam_mf.mo_energy[:-1])
+
+#########################################################
+
+#---------------- frequency grid for LDoS ------------------
+'''
+wlw = -6
+whw = 6
+
+nw_mf = 600
+nw_coarse = round(nw_mf/5) # one side
+nw_fine = nw_coarse
+nw_ultrafine = nw_mf - nw_fine*4
+
+# energy windows for ultrafine grid (one-sided width)
+ww = 0.05
+
+# second energy windows for fine grid
+Ww = 0.5
+
+freqs_mf = np.concatenate( (\
+        np.linspace(wlw,mu-Ww,nw_coarse+1), \
+        np.linspace(mu-Ww,mu-ww,nw_fine+1), \
+        np.linspace(mu-ww,mu+ww,nw_ultrafine), \
+        np.linspace(mu+ww,mu+Ww,nw_fine+1), \
+        np.linspace(mu+Ww,whw,nw_coarse+1) ) )
+
+freqs_mf = np.array(sorted(list(set(list(freqs)))))
+
+delta_coarse = (mu-Ww-wlw) / nw_coarse * 10
+delta_fine = (Ww-ww) / nw_fine * 10
+delta_ultrafine = 2*ww/nw_ultrafine * 10
+
+delta = np.concatenate( (\
+        delta_coarse * np.ones(nw_coarse), \
+        delta_fine * np.ones(nw_fine), \
+        delta_ultrafine * np.ones(nw_ultrafine), \
+        delta_fine * np.ones(nw_fine), \
+        delta_coarse * np.ones(nw_coarse) ) )
+
+'''
 
 wl_mf = -6
 wh_mf = 6
-nw_mf = 100
-delta = 0.2
+nw_mf = 600
+
+# note that given the previous bath discretization, the mean-field mo_energy
+# has a spacing near the Fermi level of ~0.003
+delta = 0.2 * np.ones(nw_mf)
 freqs_mf = np.linspace(wl_mf, wh_mf, nw_mf)
 
 # ldos (mean-field level)
 ldos_mf = np.zeros(nw_mf)
 for iw in range(nw_mf):
-    z = freqs_mf[iw] + 1j*delta
-    gf = np.linalg.inv(z*np.eye(fock.shape[0]) - fock[:,:])
+    z = freqs_mf[iw] + 1j*delta[iw]
+    gf_mo = np.diag(1./(z-siam_mf.mo_energy))
+    gf = siam_mf.mo_coeff @ gf_mo @ siam_mf.mo_coeff.T
     ldos_mf[iw] = -1./np.pi*gf[0,0].imag
+
+
+#plt.plot(freqs_mf, ldos_mf)
+#plt.xlim([-6,6])
+#plt.ylim([-0.01,0.5])
+#plt.show()
+#exit()
 
 #------------ CC impurity solver ------------
 siam_cc = cc.RCCSD(siam_mf)
-siam_cc.conv_tol = 1e-7
+siam_cc.conv_tol = 1e-8
 siam_cc.conv_tol_normt = 1e-5
 siam_cc.diis_space = 6
 siam_cc.level_shift = 0.3
@@ -150,52 +209,58 @@ siam_cc.solve_lambda()
 
 from fcdmft.solver import mpiccgf as ccgf
 
-#---------------- grid to compute LDoS ------------------
+#---------------- frequency grid for LDoS ------------------
 wl = -6
 wh = 6
 
-delta_cc1 = 0.1
-nw1 = 2*round((mu-0.5-wl)/delta_cc1)
-freqs_cc1 = np.linspace(-6,mu-0.5,nw1)
-delta_cc1 = delta_cc1*np.ones(nw1)
+W = 1
+w = 0.1
 
-delta_cc2 = 0.05
-nw2 = 2*round(0.45/delta_cc2)
-freqs_cc2 = np.linspace(mu-0.45,mu-0.05,nw2)
-delta_cc2 = delta_cc2*np.ones(nw2)
+delta_cc1 = 0.2
+nw1 = 2*round((mu-W-wl)/delta_cc1)
+freqs_cc1 = np.linspace(wl,mu-W,nw1)
+delta_cc1 = delta_cc1*np.ones(nw1-1)
 
-delta_cc3 = 0.01
-nw3 = 2*round(0.1/delta_cc3)
-freqs_cc3 = np.linspace(mu-0.05,mu+0.05,nw3)
+delta_cc2 = 0.1
+nw2 = 2*round((W-w)/delta_cc2)
+freqs_cc2 = np.linspace(mu-W,mu-w,nw2)
+delta_cc2 = delta_cc2*np.ones(nw2-1)
+
+delta_cc3 = 0.05
+nw3 = 2*round(2*w/delta_cc3)
+freqs_cc3 = np.linspace(mu-w,mu+w,nw3)
 delta_cc3 = delta_cc3*np.ones(nw3)
 
-delta_cc4 = 0.05
-nw4 = 2*round(0.45/delta_cc4)
-freqs_cc4 = np.linspace(mu+0.05,mu+0.5,nw4)
-delta_cc4 = delta_cc4*np.ones(nw4)
+delta_cc4 = 0.1
+nw4 = 2*round((W-w)/delta_cc4)
+freqs_cc4 = np.linspace(mu+w,mu+W,nw4)
+delta_cc4 = delta_cc4*np.ones(nw4-1)
 
-delta_cc5 = 0.1
-nw5 = 2*round((6-mu-0.5)/delta_cc5)
-freqs_cc5 = np.linspace(mu+0.5,6,nw5)
-delta_cc5 = delta_cc5*np.ones(nw5)
+delta_cc5 = 0.2
+nw5 = 2*round((wh-mu-W)/delta_cc5)
+freqs_cc5 = np.linspace(mu+W,wh,nw5)
+delta_cc5 = delta_cc5*np.ones(nw5-1)
 
 freqs_cc = np.concatenate((freqs_cc1,freqs_cc2,freqs_cc3,freqs_cc4,freqs_cc5))
+freqs_cc = np.array(sorted(list(set(list(freqs_cc)))))
+
 delta_cc = np.concatenate((delta_cc1,delta_cc2,delta_cc3,delta_cc4,delta_cc5))
 
-idx = np.argsort(freqs_cc)
-freqs_cc = freqs_cc[idx]
-delta_cc = delta_cc[idx]
+assert(len(freqs_cc)==len(delta_cc))
+
+print('cc freqs grid:', freqs_cc)
+print('cc freqs broadening:', delta_cc)
 
 nw = len(freqs_cc)
 ao_orbs = range(1)
 
-gmres_tol = 1e-3
+gmres_tol = 1e-4
 gf = ccgf.CCGF(siam_cc, tol=gmres_tol)
 
 ldos_cc = np.zeros(nw)
 
 for iw in range(nw):
-    print(iw, '/', nw)
+    print(iw+1, '/', nw)
     g_ip = gf.ipccsd_ao(ao_orbs, [freqs_cc[iw]], siam_mf.mo_coeff, delta_cc[iw]).conj()
     g_ea = gf.eaccsd_ao(ao_orbs, [freqs_cc[iw]], siam_mf.mo_coeff, delta_cc[iw])
     gf_tot = g_ip + g_ea
