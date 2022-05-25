@@ -325,9 +325,15 @@ else:
 kmf.with_df = gdf
 
 # add a k axis for subsequent IAO/PAO construction
-kmf.mo_coeff = mf.mo_coeff[np.newaxis,...]
-kmf.mo_energy = mf.mo_energy[np.newaxis,...]
-kmf.mo_occ = mf.mo_occ[np.newaxis,...]
+# keep spin as the first dimension
+if do_restricted:
+    kmf.mo_coeff = mf.mo_coeff[np.newaxis,...]
+    kmf.mo_energy = mf.mo_energy[np.newaxis,...]
+    kmf.mo_occ = mf.mo_occ[np.newaxis,...]
+else:
+    kmf.mo_coeff = mf.mo_coeff[:,np.newaxis,...]
+    kmf.mo_energy = mf.mo_energy[:,np.newaxis,...]
+    kmf.mo_occ = mf.mo_occ[:,np.newaxis,...]
 
 # spin: unrestricted -> 2; restricted -> 1
 if len(mf.mo_energy.shape) == 1:
@@ -469,7 +475,7 @@ if plot_orb:
 #           Quantities in LO (IAO) basis
 ############################################################
 
-data_fname = datadir + '/data_' + cell_label + '_' + method_label + '_' + solver_label + '.h5'
+data_fname = datadir + '/data_contact_' + cell_label + '_' + method_label + '_' + solver_label + '.h5'
 fh = h5py.File(data_fname, 'w')
 
 
@@ -643,6 +649,8 @@ print('JK_lo_hf.shape = ', np.asarray(fh['JK_lo_hf']).shape)
 print('JK_lo_hf_imp.shape = ', np.asarray(fh['JK_lo_hf_imp']).shape)
 
 fh.close()
+
+print('finished')
 
 
 

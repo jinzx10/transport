@@ -9,30 +9,161 @@ from libdmet.utils import plot
 from libdmet_solid.basis_transform import make_basis
 from libdmet_solid.lo.iao import reference_mol
 
+from pyscf.scf.hf import eig as eiggen
+
+import matplotlib.pyplot as plt
+
+# switch to 'production' for serious jobs
+mode = 'production'
 ############################################################
-#                   data directory
+#                       basis
+############################################################
+imp_atom = 'Fe' if mode == 'production' else 'Co'
+
+imp_basis = 'def2-svp'
+Cu_basis = 'def2-svp-bracket'
+
+############################################################
+#           directory for saving/loading data
 ############################################################
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', default = 'data', type = str)
 args = parser.parse_args()
 
 datadir = args.datadir + '/'
-print('data will be read from', datadir)
+print('data will be saved to:', datadir)
+
+if not os.path.exists(datadir):
+    os.mkdir(datadir)
 
 ############################################################
-#                   system & method info
+#                       build cell
 ############################################################
-imp_atom = 'IMP_ATOM'
-imp_basis = 'def2-svp'
-Cu_basis = 'def2-svp-bracket'
+# transport direction fcc 100 plane
+# an example of nl=4, nr=3
+# |   5        4        5      4     1      4      5       4      |   5
+# |-l-1.5a   -l-a   -l-0.5a   -l   0(imp)   r    r+0.5a   r+a     | r+1.5a
+
+# x-distance between impurity atom and nearest Cu plane
+l = 1.8 if mode == 'production' else 1.8
+r = 1.8 if mode == 'production' else 1.8
+
+# number of layers in the left/right lead included in contact SCF calculation
+nl = 2 if mode == 'production' else 4
+nr = 3 if mode == 'production' else 3
+
+# ensure that supercell periodic boundary is properly matched
+assert((nl+nr)%2 == 1)
+
+# Cu lattice constant (for the fcc cell)
+a = 3.6 if mode == 'production' else 3.6
+
+cell_label = imp_atom + '_' + imp_basis + '_Cu_' + Cu_basis \
+        + '_nl' + str(nl) + '_nr' + str(nr) \
+        + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
+
+cell_fname = datadir + '/cell_' + cell_label + '.chk'
+
+if os.path.isfile(cell_fname):
+
+    cell = chkfile.load_cell(cell_fname)
+    print('use saved cell file:', cell_fname)
+
+else:
+    
+    cell = gto.Cell()
+    
+    cell.unit = 'angstrom'
+    cell.verbose = 4
+    cell.max_memory = 50000
+    cell.dimension = 3
+
+    cell.precision = 1e-10
+    #cell.ke_cutoff = 200
+
+    # should not discard! 4s and 5s have small exponent
+    #cell.exp_to_discard = 0.1
+
+    cell.a = [[l+r+(nl+nr-1)*0.5*a,0,0], [0,10,0], [0,0,10]]
+    
+    cell.atom.append([imp_atom, (0, 0, 0)])
+
+    # left lead
+    for i in range(0, nl):
+        x = -l - (nl-1-i) * 0.5*a
+        if (i%2 == 0 and nl%2 == 1) or (i%2 == 1 and nl%2 == 0): # 4-atom layer
+            cell.atom.append(['Cu', (x,      0,  0.5*a)])
+            cell.atom.append(['Cu', (x,      0, -0.5*a)])
+            cell.atom.append(['Cu', (x,  0.5*a,      0)])
+            cell.atom.append(['Cu', (x, -0.5*a,      0)])
+        else: # 5-atom layer
+            cell.atom.append(['Cu', (x,      0,      0)])
+            cell.atom.append(['Cu', (x,  0.5*a,  0.5*a)])
+            cell.atom.append(['Cu', (x, -0.5*a,  0.5*a)])
+            cell.atom.append(['Cu', (x,  0.5*a, -0.5*a)])
+            cell.atom.append(['Cu', (x, -0.5*a, -0.5*a)])
+
+    # right lead
+    for i in range(0, nr):
+        x = i*0.5*a + r
+        if i%2 == 0: # 4-atom layer
+            cell.atom.append(['Cu', (x,      0,  0.5*a)])
+            cell.atom.append(['Cu', (x,      0, -0.5*a)])
+            cell.atom.append(['Cu', (x,  0.5*a,      0)])
+            cell.atom.append(['Cu', (x, -0.5*a,      0)])
+        else: # 5-atom layer
+            cell.atom.append(['Cu', (x,      0,      0)])
+            cell.atom.append(['Cu', (x,  0.5*a,  0.5*a)])
+            cell.atom.append(['Cu', (x, -0.5*a,  0.5*a)])
+            cell.atom.append(['Cu', (x,  0.5*a, -0.5*a)])
+            cell.atom.append(['Cu', (x, -0.5*a, -0.5*a)])
+
+    cell.spin = None # let build() decides
+    cell.basis = {imp_atom : imp_basis, 'Cu' : Cu_basis}
+    
+    cell.build()
+    
+    # save cell
+    chkfile.save_cell(cell, cell_fname)
+
+nat_Cu = len(cell.atom) - 1
+
+###############
+'''
+# plot cell
+atoms = cell.atom
+fig = plt.figure()
+ax = fig.add_subplot(projection='3d')
+
+for atm in atoms:
+    coor = atm[1]
+    cl = 'r' if atm[0] != 'Cu' else 'b'
+    ax.scatter(coor[0], coor[1], coor[2], color=cl)
+
+plt.show()
+
+exit()
+'''
+###############
+
+############################################################
+#                   mean-field method
+############################################################
+# This is the method used to generate the density matrix;
+
+# For HF+DMFT, the Fock matrix for building the impurity Hamiltonian
+# will use HF veff from the previous DM anyway (even though it's a KS-converged DM)
 
 # if False, use HF instead
-use_dft = USE_DFT
+use_dft = True if mode == 'production' else True
 
 # if use_dft
-xcfun = 'XCFUN'
+xcfun = 'pbe0' if mode == 'production' else 'pbe0'
 
-do_restricted = DO_RESTRICTED
+do_restricted = True if mode == 'production' else True
+
+# TODO may add support for ROHF/ROKS in the future
+assert( (not do_restricted) or (cell.spin==0) )
 
 if do_restricted:
     method_label = 'r'
@@ -47,21 +178,95 @@ else:
 # scf solver & addons
 # if use_smearing, use Fermi smearing
 # if False, scf will use newton solver to help convergence
-use_smearing = USE_SMEARING
-smearing_sigma = SMEARING_SIGMA
+use_smearing = True if mode == 'production' else True
+smearing_sigma = 0 if mode == 'production' else 0.05
 
 if use_smearing:
     solver_label = 'smearing' + str(smearing_sigma)
 else:
     solver_label = 'newton'
-# x-distance between impurity atom and nearest Cu plane
-l = LEFT
-r = RIGHT
 
-# Cu lattice constant (for the fcc cell)
-a = LATCONST
+############################################################
+#               density fitting
+############################################################
 
-# number of AOs
+gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
+
+gdf = df.GDF(cell)
+
+if os.path.isfile(gdf_fname):
+    print('use saved gdf cderi:', gdf_fname)
+    gdf._cderi = gdf_fname
+else:
+    gdf._cderi_to_save = gdf_fname
+    gdf.auxbasis = {imp_atom : imp_basis + '-ri', 'Cu' : Cu_basis + '-ri'}
+    gdf.build()
+
+############################################################
+#           low-level mean-field calculation
+############################################################
+
+if use_dft:
+    if do_restricted:
+        mf = scf.RKS(cell).density_fit()
+    else:
+        mf = scf.UKS(cell).density_fit()
+    mf.xc = xcfun
+else:
+    if do_restricted:
+        mf = scf.RHF(cell).density_fit()
+    else:
+        mf = scf.UHF(cell).density_fit()
+
+mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + solver_label + '.chk'
+
+mf.with_df = gdf
+
+if use_smearing:
+    mf = scf.addons.smearing_(mf, sigma = smearing_sigma, method = 'fermi')
+else:
+    mf = mf.newton()
+
+if os.path.isfile(mf_fname):
+    print('load saved mf data', mf_fname)
+    mf_data = chkfile.load(mf_fname, 'scf') 
+    mf.__dict__.update(mf_data)
+
+    mf.chkfile = mf_fname
+    mf.conv_tol = 1e-10
+    mf.max_cycle = 50
+    mf.kernel()
+else:
+    mf.chkfile = mf_fname
+    mf.conv_tol = 1e-10
+    mf.max_cycle = 300
+    mf.kernel()
+
+###############################################
+#       convergence sanity check begin
+###############################################
+if method == 'rhf' or method == 'rks':
+    S_ao_ao = mf.get_ovlp()
+    hcore_ao = mf.get_hcore()
+    JK_ao = mf.get_veff()
+    
+    e, v = eiggen(hcore_ao+JK_ao, S_ao_ao)
+    
+    print('sanity check: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mf.mo_energy-e))
+    
+    DM_ao = mf.make_rdm1()
+    mo_occ = mf.mo_occ
+    dm_fock = (v * mo_occ) @ v.T
+    print('sanity check: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao))
+
+###############################################
+#       convergence sanity check end
+###############################################
+
+
+###############################################
+#       Number of AOs
+###############################################
 if imp_basis == 'def2-svp':
     # 1s,2s,2p,3s,3p
     ncore_imp = 9
@@ -94,54 +299,6 @@ nao_Cu = nval_Cu + nvirt_Cu
 nao_Cu_tot = nao_Cu + ncore_Cu
 
 ############################################################
-#                       load cell
-############################################################
-cell = chkfile.load_cell(cell_fname)
-print('use saved cell file:', cell_fname)
-
-nat_Cu = len(cell.atom) - 1
-
-############################################################
-#               load density fitting
-############################################################
-gdf_fname = datadir + '/cderi_' + cell_label + '.h5'
-gdf = df.GDF(cell)
-
-gdf._cderi = gdf_fname
-print('use saved gdf cderi:', gdf_fname)
-
-############################################################
-#               load mean-field data
-############################################################
-if use_dft:
-    if do_restricted:
-        mf = scf.RKS(cell).density_fit()
-    else:
-        mf = scf.UKS(cell).density_fit()
-    mf.xc = xcfun
-else:
-    if do_restricted:
-        mf = scf.RHF(cell).density_fit()
-    else:
-        mf = scf.UHF(cell).density_fit()
-
-mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + solver_label + '.chk'
-
-mf.with_df = gdf
-
-if use_smearing:
-    mf = scf.addons.smearing_(mf, sigma = smearing_sigma, method = 'fermi')
-    mf.diis_space = 15
-else:
-    mf = mf.newton()
-
-print('load previous mf data', mf_fname)
-mf.__dict__.update( chkfile.load(mf_fname, 'scf') )
-mf.conv_tol = 1e-10
-mf.max_cycle = 50
-mf.kernel()
-
-############################################################
 #               build Lattice object
 ############################################################
 kmesh = [1,1,1]
@@ -172,9 +329,8 @@ kmf.mo_coeff = mf.mo_coeff[np.newaxis,...]
 kmf.mo_energy = mf.mo_energy[np.newaxis,...]
 kmf.mo_occ = mf.mo_occ[np.newaxis,...]
 
-# make sure restricted/unrestricted quantities have the same dimension
-# and set spin: unrestricted -> 2; restricted -> 1
-if len(mo_energy.shape) == 2:
+# spin: unrestricted -> 2; restricted -> 1
+if len(mf.mo_energy.shape) == 1:
     spin = 1
 else:
     spin = 2
@@ -257,9 +413,9 @@ if use_reference_mol:
     # C_ao_lo: transformation matrix from AO to LO (IAO) basis, all atoms, core orbitals are excluded
     # C_ao_lo_imp: transformation matrix from AO to LO (IAO) basis, only imp atom, core orbitals are excluded
     # C_ao_lo_tot: transformation matrix from AO to LO (IAO) basis, all atoms, all orbitals (core included!)
-    C_ao_lo    = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=C_ao_iao.dtype)
-    C_ao_lo_imp = np.zeros((spin,nkpts,nao,nao_imp), dtype=C_ao_lo.dtype)
-    C_ao_lo_tot = np.zeros((spin,nkpts,nao,nao), dtype=C_ao_lo.dtype)
+    C_ao_lo     = np.zeros((spin,nkpts,nao,nval+nvirt), dtype=C_ao_iao.dtype)
+    C_ao_lo_imp = np.zeros((spin,nkpts,nao,nao_imp   ), dtype=C_ao_iao.dtype)
+    C_ao_lo_tot = np.zeros((spin,nkpts,nao,nao       ), dtype=C_ao_iao.dtype)
     
     C_ao_lo[:,:,:,0:nval_imp] = C_ao_iao_val[:,:,:,0:nval_imp]
     C_ao_lo[:,:,:,nval_imp:nao_imp] = C_ao_iao_virt[:,:,:,0:nvirt_imp]
@@ -299,7 +455,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = False
+plot_orb = True
 
 if plot_orb:
     plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + solver_label + '.chk'
@@ -337,7 +493,7 @@ if len(DM_ao.shape) == 3:
 
 # density matrix in LO basis
 DM_lo     = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt), dtype=DM_ao.dtype)
-DM_lo_imp  = np.zeros((spin,nkpts,nao_imp    ,nao_imp    ), dtype=DM_ao.dtype)
+DM_lo_imp = np.zeros((spin,nkpts,nao_imp   ,nao_imp   ), dtype=DM_ao.dtype)
 DM_lo_tot = np.zeros((spin,nkpts,nao       ,nao       ), dtype=DM_ao.dtype)
 
 for s in range(spin):
@@ -387,11 +543,11 @@ assert(np.max(np.abs(eri_lo_imp.imag))<1e-8)
 if len(JK_ao.shape) == 3:
     JK_ao = JK_ao[np.newaxis, ...]
 
-hcore_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=hcore_ao.dtype)
-hcore_lo_imp = np.zeros((spin,nkpts,nao_imp    ,nao_imp    ),dtype=hcore_ao.dtype)
+hcore_lo     = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=hcore_ao.dtype)
+hcore_lo_imp = np.zeros((spin,nkpts,nao_imp   ,nao_imp   ),dtype=hcore_ao.dtype)
 
-JK_lo    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_ao.dtype)
-JK_lo_imp = np.zeros((spin,nkpts,nao_imp    ,nao_imp    ),dtype=JK_ao.dtype)
+JK_lo     = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_ao.dtype)
+JK_lo_imp = np.zeros((spin,nkpts,nao_imp   ,nao_imp   ),dtype=JK_ao.dtype)
 
 # let C be AO-to-LO transformation matrix
 # h^{LO} = \dg{C} h^{AO} C
@@ -424,8 +580,8 @@ if use_dft:
     else:
         JK_ao_hf = kmf_hf.get_veff(dm_kpts=DM_ao)
     
-    JK_lo_hf    = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_lo.dtype)
-    JK_lo_hf_imp = np.zeros((spin,nkpts,nao_imp    ,nao_imp    ),dtype=JK_lo.dtype)
+    JK_lo_hf     = np.zeros((spin,nkpts,nval+nvirt,nval+nvirt),dtype=JK_lo.dtype)
+    JK_lo_hf_imp = np.zeros((spin,nkpts,nao_imp   ,nao_imp   ),dtype=JK_lo.dtype)
 
     for s in range(spin):
         for ik in range(nkpts):
@@ -487,6 +643,7 @@ print('JK_lo_hf.shape = ', np.asarray(fh['JK_lo_hf']).shape)
 print('JK_lo_hf_imp.shape = ', np.asarray(fh['JK_lo_hf_imp']).shape)
 
 fh.close()
+
 
 
 
