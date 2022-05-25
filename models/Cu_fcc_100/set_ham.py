@@ -17,7 +17,8 @@ import matplotlib.pyplot as plt
 ############################################################
 #                       basis
 ############################################################
-Co_basis = 'def2-svp'
+imp_atom = 'IMP_ATOM'
+imp_basis = 'def2-svp'
 Cu_basis = 'def2-svp-bracket'
 
 ############################################################
@@ -37,8 +38,9 @@ if not os.path.exists(datadir):
 #                   mean-field method
 ############################################################
 # This is the method used to generate the density matrix;
-# The Fock matrix for building the impurity Hamiltonian
-# will use HF anyway.
+
+# For HF+DMFT, the Fock matrix for building the impurity Hamiltonian
+# will use HF veff from the previous DM anyway (even though it's a KS-converged DM)
 
 # if False, use HF instead
 use_dft = USE_DFT
@@ -72,16 +74,20 @@ else:
 ############################################################
 #                       build cell
 ############################################################
+# transport direction fcc 100 plane
+#    5        4        5      4     1      4      5       4      |(5)
+# -l-1.5a   -l-a   -l-0.5a   -l   0(imp)   r    r+0.5a   r+a     |(r+1.5a)
 
-# x-distance between Co and nearest Cu plane
+# x-distance between impurity atom and nearest Cu plane
 l = LEFT
 r = RIGHT
 
-# Cu lattice constant
+# Cu lattice constant (for the fcc cell)
 a = SPACING
 
-cell_label = 'Co_' + Co_basis + '_Cu_' + Cu_basis \
+cell_label = imp_atom + '_' + imp_basis + '_Cu_' + Cu_basis \
         + '_' + str(l) + '_r' + str(r) + '_a' + str(a)
+
 cell_fname = datadir + '/cell_' + cell_label + '.chk'
 
 if os.path.isfile(cell_fname):
@@ -104,27 +110,27 @@ else:
 
     cell.a = [[l+r+3*a,0,0], [0,10,0], [0,0,10]]
     
-    cell.atom.append(['Co', (1.5*a+l, 0.5*a, 0.5*a)])
+    cell.atom.append([imp_atom, (0, 0, 0)])
 
     # 5-atom layer
-    xl5 = [0, a, 2*a+l+r]
+    xl5 = [-l-1.5*a, -l-0.5*a, r+0.5*a]
     for x in xl5:
         cell.atom.append(['Cu', (x, 0, 0)])
-        cell.atom.append(['Cu', (x, 0, a)])
-        cell.atom.append(['Cu', (x, a, 0)])
-        cell.atom.append(['Cu', (x, a, a)])
-        cell.atom.append(['Cu', (x, 0.5*a, 0.5*a)])
+        cell.atom.append(['Cu', (x,  0.5*a,  0.5*a)])
+        cell.atom.append(['Cu', (x, -0.5*a,  0.5*a)])
+        cell.atom.append(['Cu', (x,  0.5*a, -0.5*a)])
+        cell.atom.append(['Cu', (x, -0.5*a, -0.5*a)])
 
     # 4-atom layer
-    xl4 = [0.5*a, 1.5*a, 1.5*a+l+r, 2.5*a+l+r]
+    xl4 = [-l-a, -l, r, r+a]
     for x in xl4:
-        cell.atom.append(['Cu', (x, 0, 0.5*a)])
-        cell.atom.append(['Cu', (x, 0.5*a, 0)])
-        cell.atom.append(['Cu', (x, 0.5*a, a)])
-        cell.atom.append(['Cu', (x, a, 0.5*a)])
+        cell.atom.append(['Cu', (x,      0,  0.5*a)])
+        cell.atom.append(['Cu', (x,      0, -0.5*a)])
+        cell.atom.append(['Cu', (x,  0.5*a,      0)])
+        cell.atom.append(['Cu', (x, -0.5*a,      0)])
 
     cell.spin = 0
-    cell.basis = {'Co' : Co_basis, 'Cu' : Cu_basis}
+    cell.basis = {imp_atom : imp_basis, 'Cu' : Cu_basis}
     
     cell.build()
     
@@ -170,10 +176,8 @@ if os.path.isfile(gdf_fname):
     gdf._cderi = gdf_fname
 else:
     gdf._cderi_to_save = gdf_fname
-    gdf.auxbasis = {'Co' : Co_basis + '-ri', 'Cu' : Cu_basis + '-ri'}
+    gdf.auxbasis = {imp_atom : imp_basis + '-ri', 'Cu' : Cu_basis + '-ri'}
     gdf.build()
-
-exit()
 
 ############################################################
 #           low-level mean-field calculation
@@ -226,9 +230,9 @@ if len(mo_energy.shape) == 2:
 else:
     spin = 2
 
-#################################
-#       sanity check begin
-#################################
+###############################################
+#       convergence sanity check begin
+###############################################
 if do_restricted:
     S_ao_ao = kmf.get_ovlp()
     hcore_ao = kmf.get_hcore()
@@ -239,18 +243,14 @@ if do_restricted:
     mo_energy = kmf.mo_energy
     print('sanity check: mo_energy vs. fock eigenvalue = ', np.linalg.norm(mo_energy[0]-e))
     
-    mo_occ = kmf.mo_occ
-    nocc = (27+29*nat_Cu) // 2
-    print('sanity check: sum(mo_occ) = ', np.sum(mo_occ), '   nocc = ', nocc)
-    
     if nkpts == 1:
         DM_ao = kmf.make_rdm1()
         dm_fock = (v * mo_occ[0]) @ v.T
         print('sanity check: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao[0]))
 
-#################################
-#       sanity check end
-#################################
+###############################################
+#       convergence sanity check end
+###############################################
 
 if Co_basis == 'def2-svp':
     # 1s,2s,2p,3s,3p
