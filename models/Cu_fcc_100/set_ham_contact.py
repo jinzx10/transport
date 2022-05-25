@@ -245,7 +245,7 @@ else:
 ###############################################
 #       convergence sanity check begin
 ###############################################
-if method == 'rhf' or method == 'rks':
+if do_restricted:
     S_ao_ao = mf.get_ovlp()
     hcore_ao = mf.get_hcore()
     JK_ao = mf.get_veff()
