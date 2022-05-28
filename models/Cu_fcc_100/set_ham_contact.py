@@ -6,7 +6,7 @@ from pyscf.pbc.lib import chkfile
 
 from libdmet_solid.system import lattice
 from libdmet.utils import plot
-from libdmet_solid.basis_transform import make_basis
+from libdmet_solid.basis_transform import make_basis, eri_transform
 from libdmet_solid.lo.iao import reference_mol
 
 from pyscf.scf.hf import eig as eiggen
@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 
 # switch to 'production' for serious jobs
 mode = 'TEST'
+
 ############################################################
 #                       basis
 ############################################################
@@ -464,7 +465,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 plot_orb = True
 
 if plot_orb:
-    plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + solver_label + '.chk'
+    plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + solver_label
     if not os.path.exists(plotdir):
         os.mkdir(plotdir)
 
@@ -475,7 +476,8 @@ if plot_orb:
 #           Quantities in LO (IAO) basis
 ############################################################
 
-data_fname = datadir + '/data_contact_' + cell_label + '_' + method_label + '_' + solver_label + '.h5'
+data_fname = datadir + '/data_contact_' + cell_label + '_' \
+        + method_label + '_' + solver_label + '.h5'
 fh = h5py.File(data_fname, 'w')
 
 

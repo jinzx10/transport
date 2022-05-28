@@ -14,7 +14,7 @@ from pyscf.scf.hf import eig as eiggen
 import matplotlib.pyplot as plt
 
 # switch to 'production' for serious jobs
-mode = 'TEST'
+mode = 'production'
 ############################################################
 #                       basis
 ############################################################
@@ -41,10 +41,10 @@ if not os.path.exists(datadir):
 # |   0       0.5a      a     1.5a | 2a
 
 # Cu lattice constant (for the fcc cell)
-a = LATCONST if mode == 'production' else 3.6
+a = 3.6 if mode == 'production' else 3.6
 
 # number of layers
-num_layer = NUM_LAYER if mode == 'production' else 8
+num_layer = 8 if mode == 'production' else 8
 
 cell_label = 'Cu_' + Cu_basis + '_a' + str(a) + '_n' + str(num_layer)
 
@@ -123,12 +123,12 @@ exit()
 # will use HF veff from the previous DM anyway (even though it's a KS-converged DM)
 
 # if False, use HF instead
-use_dft = USE_DFT if mode == 'production' else True
+use_dft = True if mode == 'production' else True
 
 # if use_dft
-xcfun = 'XCFUN' if mode == 'production' else 'pbe0'
+xcfun = 'pbe0' if mode == 'production' else 'pbe0'
 
-do_restricted = DO_RESTRICTED if mode == 'production' else True
+do_restricted = True if mode == 'production' else True
 
 # TODO may add support for ROHF/ROKS in the future
 assert( (not do_restricted) or (cell.spin==0) )
@@ -146,8 +146,8 @@ else:
 # scf solver & addons
 # if use_smearing, use Fermi smearing
 # if False, scf will use newton solver to help convergence
-use_smearing = USE_SMEARING if mode == 'production' else True
-smearing_sigma = SMEARING_SIGMA if mode == 'production' else 0.05
+use_smearing = False if mode == 'production' else True
+smearing_sigma = 0 if mode == 'production' else 0.05
 
 if use_smearing:
     solver_label = 'smearing' + str(smearing_sigma)
