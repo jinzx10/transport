@@ -17,18 +17,18 @@ export OMP_NUM_THREADS=14
 dir=$HOME/projects/transport/models/Cu_fcc_100
 
 #-----------------------------------
-imp_atom=Ni
+imp_atom=Co
 use_dft=True
 xcfun=pbe0
 do_restricted=True
 
-nl=2 # change to 2 for Ni/Fe and 4 for Co
+nl=4 # change to 2 for Ni/Fe and 4 for Co
 nr=3
 left=1.8
 right=1.8
 latconst=3.6
 
-use_smearing=True
+use_smearing=False
 smearing_sigma=0
 #-----------------------------------
 

@@ -32,8 +32,9 @@ print('start reading lead mean field data from', bath_dir)
 
 a = 3.6
 Cu_basis = 'def2-svp-bracket'
+num_layer = 8
 
-bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a)
+bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a) + '_n' + str(num_layer)
 
 bath_cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
 bath_cell = pbcchkfile.load_cell(bath_cell_fname)

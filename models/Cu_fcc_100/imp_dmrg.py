@@ -555,8 +555,8 @@ if rank == 0:
 
 # should be the same as the one for computing contact
 #a = 3.6
-
-bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a)
+num_layer = 8
+bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a) + '_n' + str(num_layer)
 
 bath_cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
 bath_cell = pbcchkfile.load_cell(bath_cell_fname)
@@ -1203,7 +1203,7 @@ all_freqs = np.array(sorted(list(set(list(freqs) + \
 nwa = len(all_freqs)
 '''
 
-
+'''
 ############################################################
 #       raw mean-field LDoS (from contact GF)
 ############################################################
@@ -1224,7 +1224,7 @@ if rank == 0:
     plt.show()
 
 exit()
-
+'''
 
 ############################################################
 #               bath discretization
@@ -1380,6 +1380,8 @@ if rank == 0:
     print('DMRG nelec on imp (val+virt) = ', np.trace(rdm_imp))
     print('DMRG nelec on imp (val)      = ', np.trace(rdm_imp[0:nval_imp, 0:nval_imp]))
     print('DMRG imp rdm diagonal = ', rdm_imp.diagonal())
+
+exit()
 
 ############################################################
 #               embedding model gf

@@ -5,7 +5,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=14
-#SBATCH --mem=50G
+#SBATCH --mem=100G
 #SBATCH --job-name=set_ham_lead
 
 source $HOME/.bashrc
@@ -22,9 +22,13 @@ xcfun=pbe0
 do_restricted=True
 
 latconst=3.6
+num_layer=8
 
-use_smearing=True
+use_smearing=False
 smearing_sigma=0
+
+load_mf=True
+load_solver_label='smearing0'
 #-----------------------------------
 
 if [[ ${do_restricted} == "True" ]]; then
@@ -47,7 +51,7 @@ fi
 
 Cu_basis=`grep 'Cu_basis = ' set_ham_lead.py | cut --delimiter="'" --fields=2`
 
-suffix=a${latconst}_${method}_${Cu_basis}
+suffix=a${latconst}_n${num_layer}_${method}_${Cu_basis}
 
 script=set_ham_lead_${suffix}.py
 output=set_ham_lead_${suffix}.out
@@ -62,8 +66,11 @@ sed -e"s/TEST/production/" \
     -e"s/USE_DFT/${use_dft}/" \
     -e"s/XCFUN/${xcfun}/" \
     -e"s/LATCONST/${latconst}/" \
+    -e"s/NUM_LAYER/${num_layer}/" \
     -e"s/USE_SMEARING/${use_smearing}/" \
     -e"s/SMEARING_SIGMA/${smearing_sigma}/" \
+    -e"s/LOAD_MF/${load_mf}/" \
+    -e"s/LOAD_SOLVER_LABEL/${load_solver_label}/" \
     set_ham_lead.py > ${script}
 
 python -u ${script} --datadir=${datadir} > ${output} 2>&1

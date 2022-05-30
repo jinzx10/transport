@@ -197,6 +197,21 @@ else:
     mf = mf.newton()
     mf.canonicalization = False
 
+
+# load a previous mf data (usually run with a different solver)
+load_mf = LOAD_MF if mode == 'production' else False
+if load_mf:
+    mf_load = datadir + '/' + cell_label + '_' + method_label + '_' + 'LOAD_SOLVER_LABEL' + '.chk'
+    mf_data = chkfile.load(mf_load, 'scf')
+    print('load saved mf data', mf_load)
+    mf.__dict__.update(mf_data)
+
+mf.chkfile = mf_fname
+mf.conv_tol = 1e-10
+mf.max_cycle = 200
+mf.kernel()
+
+'''
 if os.path.isfile(mf_fname):
     print('load saved mf data', mf_fname)
     mf_data = chkfile.load(mf_fname, 'scf')
@@ -212,6 +227,7 @@ else:
     mf.max_cycle = 300
 
     mf.kernel()
+'''
 
 ###############################################
 #       convergence sanity check begin
