@@ -148,6 +148,11 @@ exit()
 ###############
 
 ############################################################
+#                   gate voltage
+############################################################
+gate = GATE if mode == 'production' else 0
+
+############################################################
 #                   mean-field method
 ############################################################
 # This is the method used to generate the density matrix;
@@ -179,8 +184,8 @@ else:
 # scf solver & addons
 # if use_smearing, use Fermi smearing
 # if False, scf will use newton solver to help convergence
-use_smearing = USE_SMEARING if mode == 'production' else True
-smearing_sigma = SMEARING_SIGMA if mode == 'production' else 0.05
+use_smearing = USE_SMEARING if mode == 'production' else False
+smearing_sigma = SMEARING_SIGMA if mode == 'production' else 0
 
 if use_smearing:
     solver_label = 'smearing' + str(smearing_sigma)
@@ -233,6 +238,25 @@ if os.path.isfile(mf_fname):
     mf_data = chkfile.load(mf_fname, 'scf') 
     mf.__dict__.update(mf_data)
 
+    '''
+    print('mo_energy', mf.mo_energy)
+    print('mo_occ', mf.mo_occ)
+    print('sum(mo_occ)', np.sum(mf.mo_occ))
+
+    nelec = nat_Cu * 29 + 27
+    
+    ihomo = int(nelec/2)-1
+    ilumo = int(nelec/2)
+    print('ihomo = ', ihomo)
+    print('ilumo = ', ilumo)
+    print('mo_occ[ihomo] = ', mf.mo_occ[ihomo])
+    print('mo_occ[ilumo] = ', mf.mo_occ[ilumo])
+    print('mo_energy[ihomo] = ', mf.mo_energy[ihomo])
+    print('mo_energy[ilumo] = ', mf.mo_energy[ilumo])
+
+    exit()
+    '''
+
     mf.chkfile = mf_fname
     mf.conv_tol = 1e-10
     mf.max_cycle = 50
@@ -242,6 +266,7 @@ else:
     mf.conv_tol = 1e-10
     mf.max_cycle = 300
     mf.kernel()
+
 
 ###############################################
 #       convergence sanity check begin

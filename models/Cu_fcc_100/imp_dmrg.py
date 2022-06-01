@@ -85,14 +85,14 @@ diag_only= False
 #       frequencies to compute spectra
 ############################################################
 # coarse grid
-wl_freqs = mu - 0.4
-wh_freqs = mu + 0.3
-delta = 0.01
-nw = 100
+wl_freqs = mu - 0.01
+wh_freqs = mu + 0.01
+delta = 0.002
+nw = 20
 freqs = np.linspace(wl_freqs, wh_freqs, nw)
 dw = freqs[1] - freqs[0]
 
-extra_delta = 0.01
+extra_delta = 0.001
 extra_nw = 5
 extra_dw = dw / extra_nw
 
@@ -299,7 +299,7 @@ def gen_cas(emb_mf):
     if rank == 0:
         # NOTE why max_cycle is not 0 or do a full converged calculation?
         print('scf within CAS')
-        emb_mf_cas.kernel(dm_cas_no)
+        emb_mf_cas.kernel(dm0=dm_cas_no)
         print('scf within CAS finished!')
     comm.Barrier()
     
@@ -369,6 +369,8 @@ def get_gf_emb(emb_mf):
             os.mkdir(scratch)
         if not os.path.isdir(save_dir):
             os.mkdir(save_dir)
+
+    max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
 
     # gf_dmrg_cas has dimension (n_no, n_no, nwa) (frequency is its last dimension)
     dm_dmrg_cas, gf_dmrg_cas = dmrg_mo_gf( \
@@ -1203,7 +1205,6 @@ all_freqs = np.array(sorted(list(set(list(freqs) + \
 nwa = len(all_freqs)
 '''
 
-'''
 ############################################################
 #       raw mean-field LDoS (from contact GF)
 ############################################################
@@ -1215,6 +1216,7 @@ for iw in range(nwa):
     for s in range(spin):
         ldos_mf[s,:,iw] = -1./np.pi*GC[s,:nao_imp, :nao_imp].diagonal().imag
 
+'''
 if rank == 0:
     dfreq = all_freqs[1:] - all_freqs[:-1]
     mf_int = np.sum(ldos_mf[:,:,:-1]*dfreq, axis=2)
@@ -1305,6 +1307,8 @@ def get_emb_mf(mu, hemb, eri_imp, dm0):
     emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
     emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
 
+    return emb_mf
+
 ##########################
 '''
 mol = gto.M()
@@ -1381,7 +1385,7 @@ if rank == 0:
     print('DMRG nelec on imp (val)      = ', np.trace(rdm_imp[0:nval_imp, 0:nval_imp]))
     print('DMRG imp rdm diagonal = ', rdm_imp.diagonal())
 
-exit()
+#exit()
 
 ############################################################
 #               embedding model gf
@@ -1389,277 +1393,19 @@ exit()
 gf = get_gf_emb(emb_mf)
 ldos_dmrg = np.zeros((nwa, nao_imp))
 for iw in range(nwa):
-    gf_imp = gf[:nao_imp, :nao_imp, iw]
-    ldos_dmrg[iw,:] = -1./np.pi*gf.diagonal().imag
+    gf_imp = gf[iw, :nao_imp, :nao_imp]
+    ldos_dmrg[iw,:] = -1./np.pi*gf_imp.diagonal().imag
 
 fh = h5py.File('ldos_dmrg_' + imp_atom + '.h5', 'w')
 fh['all_freqs'] = all_freqs
-fh['ldos_mf'] = ldos_mf
 fh['ldos_dmrg'] = ldos_dmrg
+fh['ldos_mf'] = ldos_mf
 fh['mu'] = mu
 fh.close()
 
+exit()
+
 ############################################################
-#               CAS-CISD natural orbital
+#                   end of main
 ############################################################
-nocc_act = NOCC_ACT
-nvir_act = NVIR_ACT
-
-from pyscf import ci
-
-emb_cisd = ci.CISD(emb_mf)
-emb_cisd.max_cycle = 1000
-emb_cisd.max_space = 20
-emb_cisd.max_memory = 100000
-emb_cisd.conv_tol = 1e-10
-emb_cisd.verbose = 4
-
-emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
-if rank == 0:
-    if os.path.isfile(emb_cisd_fname):
-        print('load CISD data from', emb_cisd_fname)
-        emb_cisd.__dict__.update( chkfile.load(emb_cisd_fname, 'cisd') )
-    else:
-        emb_cisd.chkfile = emb_cisd_fname
-        print('CISD starts')
-        emb_cisd.kernel()
-        emb_cisd.dump_chk()
-
-
-    dm_ci_mo = emb_cisd.make_rdm1()
-    
-    nmo = emb_cisd.nmo
-    nocc = emb_cisd.nocc # number of occupied MO
-    print('nocc = ', nocc)
-    print('nmo = ', nmo)
-
-    print('dm_ci_mo.shape = ', dm_ci_mo.shape)
-
-    # find natural orbital coefficients below
-
-    # dm_ci_mo virtual block
-    no_occ_v, no_coeff_v = np.linalg.eigh(dm_ci_mo[nocc:,nocc:])
-    no_occ_v = np.flip(no_occ_v) # sort eigenvalues from large to small
-    no_coeff_v = np.flip(no_coeff_v, axis=1)
-    print('vir NO occupancy:', no_occ_v)
-
-    # occupied block
-    no_occ_o, no_coeff_o = np.linalg.eigh(dm_ci_mo[:nocc,:nocc])
-    no_occ_o = np.flip(no_occ_o)
-    no_coeff_o = np.flip(no_coeff_o, axis=1)
-    print('occ NO occupancy:', no_occ_o)
-
-    # use natural orbitals closest to the Fermi level
-    # these indices are within their own block (say, no_idx_v starts from 0)
-    no_idx_v = range(0, nvir_act)
-    no_idx_o = range(nocc-nocc_act, nocc)
-    
-    print('no_idx_v = ', no_idx_v)
-    print('no_idx_o = ', no_idx_o)
-
-    # semi-canonicalization
-    # rotate occ/vir NOs so that they diagonalize the Fock matrix within their subspace
-    fvv = np.diag(emb_mf.mo_energy[nocc:])
-    fvv_no = no_coeff_v.T @ fvv @ no_coeff_v
-    _, v_canon_v = np.linalg.eigh(fvv_no[:nvir_act,:nvir_act])
-    
-    foo = np.diag(emb_mf.mo_energy[:nocc])
-    foo_no = no_coeff_o.T @ foo @ no_coeff_o
-    _, v_canon_o = np.linalg.eigh(foo_no[-nocc_act:,-nocc_act:])
-    
-    # at this stage, no_coeff is bare MO-to-NO coefficient (before semi-canonicalization)
-    no_coeff_v = emb_mf.mo_coeff[:,nocc:] @ no_coeff_v[:,:nvir_act] @ v_canon_v
-    no_coeff_o = emb_mf.mo_coeff[:,:nocc] @ no_coeff_o[:,-nocc_act:] @ v_canon_o
-    # now no_coeff is AO-to-NO coefficient (with semi-canonicalization)
-    
-    ne_sum = np.sum(no_occ_o[no_idx_o]) + np.sum(no_occ_v[no_idx_v])
-    n_no = len(no_idx_o) + len(no_idx_v)
-    nelectron = int(round(ne_sum))
-    
-    print('number of electrons in NO: ', ne_sum)
-    print('number of electrons: ', nelectron)
-    print('number of NOs: ', n_no)
-
-
-    # NOTE still do not understand scdm, but 'local' might be important!
-    no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
-    no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
-    no_coeff = np.concatenate((no_coeff_o, no_coeff_v), axis=1)
-
-    print('natural orbital coefficients computed!')
-
-# final natural orbital coefficients for CAS
-no_coeff = comm.bcast(no_coeff, root=0)
-
-# new mf object for CAS
-# first build CAS mol object
-mol_cas = gto.M()
-mol_cas.nelectron = nelectron
-mol_cas.verbose = 4
-mol_cas.symmetry = 'c1'
-mol_cas.incore_anyway = True
-emb_mf_cas = scf.RHF(mol_cas)
-
-# hcore & eri in NO basis
-h1e = no_coeff.T @ (emb_mf.get_hcore() @ no_coeff)
-g2e = ao2mo.restore(8, ao2mo.kernel(emb_mf._eri, no_coeff), n_no)
-
-
-dm_hf = emb_mf.make_rdm1()
-dm_cas_no = no_coeff.T @ dm_hf @ no_coeff
-JK_cas_no = _get_veff(dm_cas_no, g2e)[0]
-JK_full_no = no_coeff.T @ emb_mf.get_veff() @ no_coeff
-h1e = h1e + JK_full_no - JK_cas_no
-h1e = 0.5 * (h1e + h1e.T)
-
-h1e = comm.bcast(h1e, root=0)
-g2e = comm.bcast(g2e, root=0)
-
-# set up integrals for emb_mf_cas
-emb_mf_cas.get_hcore = lambda *args: h1e
-emb_mf_cas.get_ovlp = lambda *args: np.eye(n_no)
-emb_mf_cas._eri = g2e
-
-if rank == 0:
-    # NOTE why max_cycle is not 0 or do a full converged calculation?
-    print('scf within CAS')
-    emb_mf_cas.kernel(dm_cas_no)
-    print('scf within CAS finished!')
-comm.Barrier()
-
-emb_mf_cas.mo_occ = comm.bcast(emb_mf_cas.mo_occ, root=0)
-emb_mf_cas.mo_energy = comm.bcast(emb_mf_cas.mo_energy, root=0)
-emb_mf_cas.mo_coeff = comm.bcast(emb_mf_cas.mo_coeff, root=0)
-
-# gf_hf (HF GF in AO basis) is computed above
-# now we compute gf_hf_cas
-mo_energy_cas = emb_mf_cas.mo_energy
-mo_coeff_cas  = emb_mf_cas.mo_coeff
-
-gf_hf_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*delta
-    gf_mo_cas = np.diag( 1. / (z - mo_energy_cas) )
-    gf_hf_cas[iw,:,:] = mo_coeff_cas @ gf_mo_cas @ mo_coeff_cas.T
-
-# end of make_casno_cisd
-# return emb_mf_cas, no_coeff, dm_ci_mo
-
-############################################
-# see cas_cisd
-# cas_cisd pass return_dm=True to make_casno_cisd and leave get_cas_mo as default (True)
-
-dm_ci_ao = emb_mf.mo_coeff @ dm_ci_mo @ emb_mf.mo_coeff.T
-if rank == 0:
-    print('CISD Nelec on impurity = ', np.trace(dm_ci_ao[:nao_imp,:nao_imp]))
-
-#no_coeff = no_coeff[np.newaxis, ...]
-dm_ao = emb_mf.make_rdm1()
-dm_cas_ao = emb_mf_cas.make_rdm1()
-
-# cas_cisd return mf_cas, no_coeff, gf_hf, gf_hf_cas, dm_ao, dm_cas_ao
-# gf_hf is gf_low; gf_hf_cas is gf_low_cas
-###############
-
-mf_dmrg = emb_mf_cas
-gf_orbs = range(n_no) # full GF in CAS space
-diag_only= False
-
-# exists in dmrg_gf (see dmft_solver.py)
-# NOTE but not sure why save number of CAS orbitals in bare mf
-#emb_mf.nocc_act = nocc_act
-#emb_mf.nvir_act = nvir_act
-
-
-######################################
-#       DMRG parameters
-######################################
-# NOTE scratch conflict for different job!
-# NOTE verbose=3 good enough
-# NOTE extra_freqs & extra_delta are set above
-#extra_freqs = None
-#extra_delta = None
-n_threads = NUM_THREADS
-reorder_method='gaopt'
-max_memory = emb_mf.max_memory * 1E6 # in unit of bytes, per mpi proc
-
-# bond dimension: make DW ~ 1e-5/e-6 or smaller
-# 2000-5000 for gs
-gs_n_steps = 20
-gs_bond_dims = [400] * 5 + [800] * 5 + [1500] * 5 + [2000] * 5
-gs_tol = 1E-8
-gs_noises = [1E-3] * 5 + [1E-4] * 3 + [1e-7] * 2 + [0]
-
-# gf_bond_dims 1k~1.5k
-gf_n_steps = 6
-gf_bond_dims = [200] * 2 + [500] * 4
-gf_tol = 1E-3
-gf_noises = [1E-4] * 2 + [1E-5] * 2 + [1E-7] * 1 + [0]
-
-gmres_tol = 1E-7
-
-cps_bond_dims = [2000]
-#cps_noises = [0]
-#cps_tol = 1E-10
-#cps_n_steps=20
-n_off_diag_cg = -2
-
-# correlation method within DMRG (like CAS, but not recommended)
-dyn_corr_method = None
-ncore_dmrg = 0
-nvirt_dmrg = 0
-
-
-###################
-
-from fcdmft.solver.gfdmrg import dmrg_mo_pdm, dmrg_mo_gf
-
-# gf_dmrg_cas has dimension (nao, nao, nwa) (len(freqs) is its last dimension)
-dm_dmrg_cas, gf_dmrg_cas = dmrg_mo_gf( \
-        mf_dmrg, freqs=freqs, delta=delta, ao_orbs=gf_orbs, mo_orbs=None, \
-        extra_freqs=extra_freqs, extra_delta=extra_delta, scratch=scratch, add_rem='+-', \
-        n_threads=n_threads, reorder_method=reorder_method, memory=max_memory, \
-        gs_bond_dims=gs_bond_dims, gf_bond_dims=gf_bond_dims, gf_n_steps=gf_n_steps, \
-        gs_n_steps=gs_n_steps, gs_tol=gs_tol, gf_noises=gf_noises, gf_tol=gf_tol, \
-        gs_noises=gs_noises, gmres_tol=gmres_tol, load_dir=None, save_dir=save_dir, \
-        cps_bond_dims=cps_bond_dims, cps_noises=[0], cps_tol=gs_tol, cps_n_steps=gs_n_steps, \
-        verbose=1, mo_basis=False, ignore_ecore=False, n_off_diag_cg=n_off_diag_cg, \
-        mpi=True, dyn_corr_method=dyn_corr_method, ncore=ncore_dmrg, nvirt=nvirt_dmrg, diag_only=diag_only)
-
-print('gf_dmrg_cas.shape', gf_dmrg_cas.shape)
-
-fh = h5py.File('gf_dmrg_cas_' + imp_atom + '.h5', 'w')
-fh['gf_dmrg_cas'] = gf_dmrg_cas
-fh.close()
-
-#fh = h5py.File('gf_dmrg_cas.h5', 'r')
-#gf_dmrg_cas = np.asarray(fh['gf_dmrg_cas'])
-###################
-
-# compute sigma_cas, NO active space self energy
-sigma_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-for iw in range(nwa):
-    sigma_cas[iw,:,:] = np.linalg.inv(gf_hf_cas[iw,:,:]) - np.linalg.inv(gf_dmrg_cas[:,:,iw])
-
-# convert sigma_cas to self energy in AO space
-sigma_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-for iw in range(nwa):
-    sigma_ao[iw,:,:] = no_coeff @ (sigma_cas[iw,:,:] @ no_coeff.T)
-
-# final GF in AO space (contains active space DMRG self energy)
-gf_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-ldos_dmrg = np.zeros(nwa)
-for iw in range(nwa):
-    gf_ao[iw,:,:] = np.linalg.inv( np.linalg.inv(gf_hf[iw,:,:]) - sigma_ao[iw,:,:] )
-    ldos_dmrg[iw] = -1./np.pi * gf_ao[iw,0,0].imag
-
-fh = h5py.File('ldos_dmrg_' + imp_atom + '.h5', 'w')
-fh['all_freqs'] = all_freqs
-fh['ldos_mf'] = ldos_mf
-fh['ldos_dmrg'] = ldos_dmrg
-fh['mu'] = mu
-fh.close()
-
-
-
 
