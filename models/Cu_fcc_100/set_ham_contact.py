@@ -151,6 +151,7 @@ exit()
 #                   gate voltage
 ############################################################
 gate = GATE if mode == 'production' else 0
+gate_label = 'gate' + str(gate)
 
 ############################################################
 #                   mean-field method
@@ -181,16 +182,6 @@ if use_dft:
 else:
     method_label += 'hf'
 
-# scf solver & addons
-# if use_smearing, use Fermi smearing
-# if False, scf will use newton solver to help convergence
-use_smearing = USE_SMEARING if mode == 'production' else False
-smearing_sigma = SMEARING_SIGMA if mode == 'production' else 0
-
-if use_smearing:
-    solver_label = 'smearing' + str(smearing_sigma)
-else:
-    solver_label = 'newton'
 
 ############################################################
 #               density fitting
@@ -209,7 +200,7 @@ else:
     gdf.build()
 
 ############################################################
-#           low-level mean-field calculation
+#                   mean-field object
 ############################################################
 
 if use_dft:
@@ -224,48 +215,69 @@ else:
     else:
         mf = scf.UHF(cell).density_fit()
 
-mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + solver_label + '.chk'
-
 mf.with_df = gdf
 
-if use_smearing:
-    mf = scf.addons.smearing_(mf, sigma = smearing_sigma, method = 'fermi')
-else:
-    mf = mf.newton()
+############################################################
+#                   apply gate voltage
+############################################################
+nao_imp = cell.aoslice_by_atom()[0][3]
+print('number of impurity AO orbitals = ', nao_imp)
+h1 = mf.get_hcore()
+ovlp = mf.get_ovlp()
+h1[0:nao_imp, 0:nao_imp] += gate*ovlp[0:nao_imp, 0:nao_imp]
+mf.get_hcore = lambda *args: h1
 
-if os.path.isfile(mf_fname):
+############################################################
+#           low-level mean-field calculation
+############################################################
+
+mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + gate_label + '.chk'
+
+load_mf = LOAD_MF if mode == 'production' else False
+if load_mf:
+    mf_data = chkfile.load(mf_fname, 'scf')
     print('load saved mf data', mf_fname)
-    mf_data = chkfile.load(mf_fname, 'scf') 
     mf.__dict__.update(mf_data)
-
-    '''
-    print('mo_energy', mf.mo_energy)
-    print('mo_occ', mf.mo_occ)
-    print('sum(mo_occ)', np.sum(mf.mo_occ))
-
-    nelec = nat_Cu * 29 + 27
-    
-    ihomo = int(nelec/2)-1
-    ilumo = int(nelec/2)
-    print('ihomo = ', ihomo)
-    print('ilumo = ', ilumo)
-    print('mo_occ[ihomo] = ', mf.mo_occ[ihomo])
-    print('mo_occ[ilumo] = ', mf.mo_occ[ilumo])
-    print('mo_energy[ihomo] = ', mf.mo_energy[ihomo])
-    print('mo_energy[ilumo] = ', mf.mo_energy[ilumo])
-
-    exit()
-    '''
-
+    mf = mf.newton()
+    mf.canonicalization = False
     mf.chkfile = mf_fname
-    mf.conv_tol = 1e-10
+    mf.kernel()
+else:
+    '''
+    # use a few smearing first, then Newton
+    mf_smearing = scf.addons.smearing_(mf, sigma = 0.05, method = 'fermi')
+    mf_smearing.max_cycle = 20
+    mf_smearing.kernel()
+    
+    mf_smearing.sigma = 0.01
+    mf_smearing.kernel(mf_smearing.make_rdm1())
+    
+    mf_smearing.sigma = 0
+    mf_smearing.kernel(mf_smearing.make_rdm1())
+    '''
+
+    # do a few DIIS first, then switch to Newton
     mf.max_cycle = 50
     mf.kernel()
-else:
+    dm0 = mf.make_rdm1()
+
+    mf = mf.newton()
+    mf.canonicalization = False
     mf.chkfile = mf_fname
-    mf.conv_tol = 1e-10
-    mf.max_cycle = 300
-    mf.kernel()
+    mf.kernel(dm0=dm0)
+
+
+nelec = nat_Cu * 29
+
+if imp_atom == 'Fe':
+    nelec += 26
+elif imp_atom == 'Co':
+    nelec += 27
+elif imp_atom == 'Ni':
+    nelec += 28
+else:
+    print('do not know nelec of imp_atom')
+    exit()
 
 
 ###############################################
@@ -490,7 +502,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 plot_orb = True
 
 if plot_orb:
-    plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + solver_label
+    plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + gate_label
     if not os.path.exists(plotdir):
         os.mkdir(plotdir)
 
@@ -501,8 +513,7 @@ if plot_orb:
 #           Quantities in LO (IAO) basis
 ############################################################
 
-data_fname = datadir + '/data_contact_' + cell_label + '_' \
-        + method_label + '_' + solver_label + '.h5'
+data_fname = datadir + '/data_contact_' + cell_label + '_' + method_label + '_' + gate_label + '.h5'
 fh = h5py.File(data_fname, 'w')
 
 
