@@ -46,6 +46,11 @@ freqs = np.linspace(wl_freqs, wh_freqs, nw)
 dw = freqs[1] - freqs[0]
 
 ############################################################
+#                   gate voltage
+############################################################
+gate_label = 'gate0.001'
+
+############################################################
 #           read contact's mean-field data
 ############################################################
 contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
@@ -75,10 +80,9 @@ gdf_fname = contact_dir + '/cderi_' + cell_label + '.h5'
 
 xcfun = 'pbe0'
 method_label = 'rks_' + xcfun
-solver_label = 'newton'
 
 data_fname = contact_dir + '/data_contact_' + cell_label + '_' \
-        + method_label + '_' + solver_label + '.h5'
+        + method_label + '_' + gate_label + '.h5'
 
 #------------ read core Hamiltonian and HF veff (built with DFT DM)  ------------
 fh = h5py.File(data_fname, 'r')
@@ -409,11 +413,11 @@ def gen_log_grid(w0, w, l, num):
 ############################################################
 #------------ log discretization ------------
 wlg = -0.6
-whg = 1.8
-nbe = 200 # total number of bath energies
-nbath_per_ene = 6
+whg = 0.8
+nbe = 50 # total number of bath energies
+nbath_per_ene = 3
 
-log_disc_base = 1.4
+log_disc_base = 1.5
 
 # distance to mu
 wl0 = mu - wlg
@@ -428,7 +432,8 @@ nh = nbe - nl
 grid = np.concatenate((gen_log_grid(mu, wlg, log_disc_base, nl), [mu], \
         gen_log_grid(mu, whg, log_disc_base, nh)))
 
-grid = np.linspace(wlg,whg,nbe+1)
+#grid = np.linspace(wlg,whg,nbe+1)
+
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
 
@@ -585,12 +590,13 @@ veff_0 = mf.get_veff(mol=mol,dm=dm0[0])
 fock_0 = veff_0 + mf.get_hcore()
 print('fock_0.shape = ', fock_0.shape)
 
+'''
 e,v = eiggen(fock_0, np.eye(nemb))
-#print('e = ', e)
 v_occ = v[:, e<mu]
 dm_new = 2. * v_occ @ v_occ.T
 print('imp nelec = ', np.trace(dm_new[:22,:22]))
 print('dm diff = ', np.linalg.norm(dm_new[:22,:22]-dm0[0,:22,:22]) )
+'''
 
 #exit()
 
@@ -662,7 +668,7 @@ print('trace(rdm1[imp val])', np.trace(rdm1[0:nval_imp,0:nval_imp]))
 if spin == 1:
     fock = fock[np.newaxis,...]
 
-wld = -0.8
+wld = -0.4
 whd = 0.8
 nwd = 200
 delta = 0.01
@@ -680,7 +686,7 @@ for s in range(spin):
 # raw mean-field LDoS from contact Green's function
 ldos = np.zeros((spin,nwd,nval_imp))
 for iw in range(nwd):
-    z = freqs[iw] + 1j*delta
+    z = freqs[iw] + 1.5j*delta # FIXME need larger broadening?
     GC = contact_Greens_function(z)
     for s in range(spin):
         ldos[s,iw,:] = -1./np.pi*np.diag(GC[s,:nval_imp, :nval_imp]).imag
@@ -689,6 +695,8 @@ fh = h5py.File('imp_rks_ldos.h5', 'w')
 fh['freqs'] = freqs
 fh['A'] = A[0,:,:]
 fh['ldos'] = ldos[0,:,:]
+fh['nbe'] = nbe
+fh['nbath_per_ene'] = nbath_per_ene
 fh.close()
 
 

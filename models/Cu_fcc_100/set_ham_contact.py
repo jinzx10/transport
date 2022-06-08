@@ -129,6 +129,20 @@ else:
 
 nat_Cu = len(cell.atom) - 1
 
+nelec = nat_Cu * 29
+
+if imp_atom == 'Fe':
+    nelec += 26
+elif imp_atom == 'Co':
+    nelec += 27
+elif imp_atom == 'Ni':
+    nelec += 28
+else:
+    print('do not know nelec of imp_atom')
+    exit()
+
+# currently only use restricted calculation
+assert(nelec%2==0)
 ###############
 '''
 # plot cell
@@ -151,7 +165,7 @@ exit()
 #                   gate voltage
 ############################################################
 gate = GATE if mode == 'production' else 0
-gate_label = 'gate' + str(gate)
+gate_label = 'gate%5.3f'%(gate)
 
 ############################################################
 #                   mean-field method
@@ -222,62 +236,60 @@ mf.with_df = gdf
 ############################################################
 nao_imp = cell.aoslice_by_atom()[0][3]
 print('number of impurity AO orbitals = ', nao_imp)
-h1 = mf.get_hcore()
-ovlp = mf.get_ovlp()
-h1[0:nao_imp, 0:nao_imp] += gate*ovlp[0:nao_imp, 0:nao_imp]
+
+ref_fname = datadir + '/ref_contact_' + cell_label + '.h5'
+if os.path.isfile(ref_fname):
+    fh = h5py.File(ref_fname, 'r')
+    h1 = np.asarray(fh['h1'])
+    ovlp = np.asarray(fh['ovlp'])
+else:
+    h1 = mf.get_hcore()
+    ovlp = mf.get_ovlp()
+    fh = h5py.File(ref_fname, 'w')
+    fh['h1'] = h1
+    fh['ovlp'] = ovlp
+
+fh.close()
+
+# h -> h + \sum_{\mu,\nu \in imp}|\mu> inv(S_imp)_{\mu\nu} <\nu|
+h1 += gate * ovlp[:,0:nao_imp] @ np.linalg.solve(ovlp[0:nao_imp, 0:nao_imp], ovlp[0:nao_imp,:])
+
 mf.get_hcore = lambda *args: h1
+mf.get_ovlp = lambda *args: ovlp
 
 ############################################################
 #           low-level mean-field calculation
 ############################################################
 
-mf_fname = datadir + '/' + cell_label + '_' + method_label + '_' + gate_label + '.chk'
+mf_save_fname = datadir + '/' + cell_label + '_' + method_label + '_' + gate_label + '.chk'
 
-load_mf = LOAD_MF if mode == 'production' else False
-if load_mf:
-    mf_data = chkfile.load(mf_fname, 'scf')
-    print('load saved mf data', mf_fname)
+mf_load_fname = 'MF_LOAD_FNAME' if mode == 'production' else None
+
+if mf_load_fname is not None:
+    mf_data = chkfile.load(mf_load_fname, 'scf')
+    print('load saved mf data', mf_load_fname)
     mf.__dict__.update(mf_data)
     mf = mf.newton()
     mf.canonicalization = False
-    mf.chkfile = mf_fname
+    mf.chkfile = mf_save_fname
     mf.kernel()
 else:
-    '''
-    # use a few smearing first, then Newton
-    mf_smearing = scf.addons.smearing_(mf, sigma = 0.05, method = 'fermi')
-    mf_smearing.max_cycle = 20
-    mf_smearing.kernel()
-    
-    mf_smearing.sigma = 0.01
-    mf_smearing.kernel(mf_smearing.make_rdm1())
-    
-    mf_smearing.sigma = 0
-    mf_smearing.kernel(mf_smearing.make_rdm1())
-    '''
 
-    # do a few DIIS first, then switch to Newton
+    mf_newton = mf.newton()
+    mf_newton.max_cycle = 150
+    mf_newton.kernel()
+    dm0 = mf_newton.make_rdm1()
+
     mf.max_cycle = 50
-    mf.kernel()
+    mf.kernel(dm0=dm0)
     dm0 = mf.make_rdm1()
 
     mf = mf.newton()
+    mf.max_cycle = 150
     mf.canonicalization = False
-    mf.chkfile = mf_fname
+    mf.chkfile = mf_save_fname
     mf.kernel(dm0=dm0)
 
-
-nelec = nat_Cu * 29
-
-if imp_atom == 'Fe':
-    nelec += 26
-elif imp_atom == 'Co':
-    nelec += 27
-elif imp_atom == 'Ni':
-    nelec += 28
-else:
-    print('do not know nelec of imp_atom')
-    exit()
 
 
 ###############################################
@@ -295,7 +307,10 @@ if do_restricted:
     DM_ao = mf.make_rdm1()
     mo_occ = mf.mo_occ
     dm_fock = (v * mo_occ) @ v.T
-    print('sanity check: dm diff between make_rdm1 and fock-solved = ', np.linalg.norm(dm_fock-DM_ao))
+
+    scf_err = np.linalg.norm(dm_fock-DM_ao)
+    print('sanity check: dm diff between make_rdm1 and fock-solved = ', scf_err)
+
 
 ###############################################
 #       convergence sanity check end
@@ -372,6 +387,9 @@ else:
     kmf.mo_coeff = mf.mo_coeff[:,np.newaxis,...]
     kmf.mo_energy = mf.mo_energy[:,np.newaxis,...]
     kmf.mo_occ = mf.mo_occ[:,np.newaxis,...]
+
+kmf.get_hcore = lambda *args: h1[np.newaxis,...]
+kmf.get_ovlp  = lambda *args: ovlp[np.newaxis,...]
 
 # spin: unrestricted -> 2; restricted -> 1
 if len(mf.mo_energy.shape) == 1:
@@ -499,7 +517,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = True
+plot_orb = False
 
 if plot_orb:
     plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + gate_label
@@ -516,7 +534,6 @@ if plot_orb:
 data_fname = datadir + '/data_contact_' + cell_label + '_' + method_label + '_' + gate_label + '.h5'
 fh = h5py.File(data_fname, 'w')
 
-
 S_ao_ao = np.asarray(kmf.get_ovlp())
 DM_ao = np.asarray(kmf.make_rdm1())
 hcore_ao = np.asarray(kmf.get_hcore())
@@ -530,6 +547,8 @@ fh['JK_ao'] = JK_ao
 fh['C_ao_lo'] = C_ao_lo
 fh['C_ao_lo_imp'] = C_ao_lo_imp
 fh['C_ao_lo_tot'] = C_ao_lo_tot
+
+
 
 # add an additional axis for convenience (but this will not be stored!)
 if len(DM_ao.shape) == 3:

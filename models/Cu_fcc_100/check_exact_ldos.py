@@ -37,6 +37,11 @@ freqs = np.linspace(wl_freqs, wh_freqs, nw)
 dw = freqs[1] - freqs[0]
 
 ############################################################
+#                   gate voltage
+############################################################
+gate_label = 'gate0.000'
+
+############################################################
 #           read contact's mean-field data
 ############################################################
 contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
@@ -66,10 +71,9 @@ gdf_fname = contact_dir + '/cderi_' + cell_label + '.h5'
 
 xcfun = 'pbe0'
 method_label = 'rks_' + xcfun
-solver_label = 'newton'
 
 data_fname = contact_dir + '/data_contact_' + cell_label + '_' \
-        + method_label + '_' + solver_label + '.h5'
+        + method_label + '_' + gate_label + '.h5'
 
 #------------ read core Hamiltonian and HF veff (built with DFT DM)  ------------
 fh = h5py.File(data_fname, 'r')

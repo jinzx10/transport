@@ -83,6 +83,20 @@ diag_only= False
 
 
 ############################################################
+#           an unknown auxiliary function
+############################################################
+def scdm(coeff, overlap):
+    from pyscf import lo
+    aux = lo.orth.lowdin(overlap)
+    no = coeff.shape[1]
+    ova = coeff.T @ overlap @ aux
+    piv = scipy.linalg.qr(ova, pivoting=True)[2]
+    bc = ova[:, piv[:no]]
+    ova = np.dot(bc.T, bc)
+    s12inv = lo.orth.lowdin(ova)
+    return coeff @ bc @ s12inv
+
+############################################################
 #           CAS from CISD natural orbital
 ############################################################
 def gen_cas(emb_mf):
@@ -98,6 +112,7 @@ def gen_cas(emb_mf):
     
     emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
     if rank == 0:
+        '''
         if os.path.isfile(emb_cisd_fname):
             print('load CISD data from', emb_cisd_fname)
             emb_cisd.__dict__.update( chkfile.load(emb_cisd_fname, 'cisd') )
@@ -106,6 +121,10 @@ def gen_cas(emb_mf):
             print('CISD starts')
             emb_cisd.kernel()
             emb_cisd.dump_chk()
+        '''
+        # always run CISD from scratch
+        print('CISD starts')
+        emb_cisd.kernel()
     
         dm_ci_mo = emb_cisd.make_rdm1()
         
@@ -328,9 +347,8 @@ def get_gf_emb(emb_mf):
 ############################################################
 #                   gate voltage
 ############################################################
-# shift the imp one-body Hamiltonian
 gate = GATE if mode == 'production' else 0
-gate_label = 'gate' + str(gate)
+gate_label = 'gate%5.3f'%(gate)
 
 ############################################################
 #           read contact's mean-field data
@@ -443,7 +461,8 @@ comm.Barrier()
 #           number of electrons on impurity
 ############################################################
 # target number of electrons on the impurity for mu-optimization
-nelec_lo_imp = np.trace(DM_lo_imp[s].sum(axis=0)/nkpts)
+nelec_lo_imp = np.trace(DM_lo_imp[0].sum(axis=0)/nkpts)
+print('mf number of electrons on imp:', nelec_lo_imp)
 
 ############################################################
 #               read lead's mean-field data
@@ -739,7 +758,7 @@ def get_emb_mf(mu):
     emb_mf.diis_space = 15
 
     if rank == 0:
-        emb_mf.kernel(dm0)
+        emb_mf.kernel(dm0[0])
 
     emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
     emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
@@ -759,11 +778,15 @@ def dnelec(mu):
     nelec_imp_dmrg = np.trace(rdm_imp)
     return nelec_imp_dmrg - nelec_lo_imp
 
-mu, flag = broydenroot(dnelec, mu0, tol = 0.01, max_iter = 10)
+mu, flag = broydenroot(dnelec, mu0, tol = 0.001, max_iter = 20)
 
-if flag != 0:
+if flag == 0:
+    print('optimized mu = ', mu)
+    print('nelec diff = ', dnelec(mu))
+else:
+    print('current mu = ', mu)
+    print('nelec diff = ', dnelec(mu))
     print('mu optimization failed!')
-    exit()
 
 exit()
 
