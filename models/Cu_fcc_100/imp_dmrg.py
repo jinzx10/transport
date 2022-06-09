@@ -28,7 +28,10 @@ mode = 'MODE'
 
 imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
 
-# initial guess for the chemical potential
+# whether perform an optimization or just a one-shot calculation
+opt_mu = OPT_MU
+
+# chemical potential (initial guess in optimization if opt_mu is True)
 mu0 = CHEM_POT if mode == 'production' else 0.05
 
 # DMRG scratch & save folder
@@ -353,7 +356,8 @@ gate_label = 'gate%5.3f'%(gate)
 ############################################################
 #           read contact's mean-field data
 ############################################################
-contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
+#contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
+contact_dir = 'PREFIX/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
 if rank == 0:
     print('read contact\'s mean field data from', contact_dir)
 
@@ -468,7 +472,8 @@ print('mf number of electrons on imp:', nelec_lo_imp)
 #               read lead's mean-field data
 ############################################################
 
-bath_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/Cu/'
+#bath_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/Cu/'
+bath_dir = 'PREFIX/projects/transport/models/Cu_fcc_100/Cu/'
 
 if rank == 0:
     print('start reading lead mean field data from', bath_dir)
@@ -682,7 +687,7 @@ comm.Barrier()
 ########################################
 #   parameters for bath discretization
 ########################################
-nbe = 40 # total number of bath energies
+nbe = 50 # total number of bath energies
 nbath_per_ene = 3
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
@@ -771,22 +776,33 @@ def get_emb_mf(mu):
 ############################################################
 #               optimize chemical potential
 ############################################################
-def dnelec(mu):
-    emb_mf = get_emb_mf(mu)
-    rdm = get_rdm_emb(emb_mf)
-    rdm_imp = rdm[0:nao_imp, 0:nao_imp]
-    nelec_imp_dmrg = np.trace(rdm_imp)
-    return nelec_imp_dmrg - nelec_lo_imp
-
-mu, flag = broydenroot(dnelec, mu0, tol = 0.001, max_iter = 20)
-
-if flag == 0:
-    print('optimized mu = ', mu)
-    print('nelec diff = ', dnelec(mu))
+if opt_mu:
+    def dnelec(mu):
+        emb_mf = get_emb_mf(mu)
+        rdm = get_rdm_emb(emb_mf)
+        rdm_imp = rdm[0:nao_imp, 0:nao_imp]
+        nelec_imp_dmrg = np.trace(rdm_imp)
+        return nelec_imp_dmrg - nelec_lo_imp
+    
+    mu, flag = broydenroot(dnelec, mu0, tol = 0.001, max_iter = 20)
+    
+    if flag == 0:
+        print('optimized mu = ', mu)
+        print('nelec diff = ', dnelec(mu))
+    else:
+        print('current mu = ', mu)
+        print('nelec diff = ', dnelec(mu))
+        print('mu optimization failed!')
 else:
-    print('current mu = ', mu)
-    print('nelec diff = ', dnelec(mu))
-    print('mu optimization failed!')
+    mu = mu0
+    print('no optimiziation is performed')
+    print('mu = ', mu)
+
+emb_mf = get_emb_mf(mu)
+rdm = get_rdm_emb(emb_mf)
+rdm_imp = rdm[0:nao_imp, 0:nao_imp]
+nelec_imp_dmrg = np.trace(rdm_imp)
+print('nelec diff = ', nelec_imp_dmrg - nelec_lo_imp)
 
 exit()
 
