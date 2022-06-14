@@ -94,3 +94,48 @@ def direct_disc_hyb(hyb, grid, nint=1, nbath_per_ene=None, eig_tol=1e-8):
     return e, v
 
 
+# return sort( w0 + (w-w0)*l**(-i) ) where i ranges from 0 to num-1
+def gen_log_grid(w0, w, l, num):
+    grid = w0 + (w-w0) * l**(-np.arange(num,dtype=float))
+    if w > w0:
+        return grid[::-1]
+    else:
+        return grid
+
+# len(grid) == nbe+1
+def gen_grid(nbe, wl, wh, mu, grid_type='custom1', log_disc_base=1.6, wlog = 0.01):
+    if grid_type == 'log': # log grid around mu
+        wl0 = mu - wl
+        wh0 = wh - mu
+        
+        # number of energies above/below the Fermi level
+        dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
+        nl = nbe//2 - dif
+        nh = nbe - nl
+        grid = np.concatenate( (gen_log_grid(mu, wl, log_disc_base, nl), [mu], \
+                gen_log_grid(mu, wh, log_disc_base, nh)) )
+
+    elif grid_type == 'linear': # linear between wl and wh
+        grid = np.linspace(wl,wh,nbe+1)
+
+    elif grid_type == 'custom1': # log near Fermi level; linear elsewhere
+        # half side number of points in log disc (center point, mu, not included)
+        nw_log = (nbe+1) // 4 // 2
+        
+        # number of points in linear disc (boundary with log disc excluded)
+        nw_lin = nbe - nw_log*2
+        
+        # 2*nw_log+1 points
+        grid_log = np.concatenate((gen_log_grid(mu, mu-wlog, log_disc_base, nw_log), [mu], \
+                gen_log_grid(mu, mu+wlog, log_disc_base, nw_log)))
+        
+        dg_raw = (wh-wl-2*wlog)/nw_lin
+        nl_lin = round( (mu-wlog-wl)/dg_raw )
+        nh_lin = nw_lin - nl_lin
+        grid = np.concatenate( (np.linspace(wl,mu-wlog,nl_lin+1), grid_log, np.linspace(mu+wlog,wh,nh_lin+1)) )
+        grid = np.array(sorted(list(set(list(grid)))))
+
+    return grid
+
+
+

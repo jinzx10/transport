@@ -38,6 +38,7 @@ mu0 = CHEM_POT if mode == 'production' else 0.05
 scratch = 'SCRATCH'
 save_dir = 'SAVEDIR'
 os.environ['TMPDIR'] = scratch
+os.environ['PYSCF_TMPDIR'] = scratch
 
 # number of active space occ/vir orbitals
 nocc_act = NOCC_ACT if mode == 'production' else 6
@@ -108,9 +109,9 @@ def gen_cas(emb_mf):
     
     emb_cisd = ci.CISD(emb_mf)
     emb_cisd.max_cycle = 1000
-    emb_cisd.max_space = 20
-    emb_cisd.max_memory = 100000
-    emb_cisd.conv_tol = 1e-10
+    emb_cisd.max_space = 15
+    #emb_cisd.max_memory = 100000
+    emb_cisd.conv_tol = 1e-9
     emb_cisd.verbose = 4
     
     emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
@@ -127,6 +128,7 @@ def gen_cas(emb_mf):
         '''
         # always run CISD from scratch
         print('CISD starts')
+        print('CISD max_memory = ', emb_cisd.max_memory)
         emb_cisd.kernel()
     
         dm_ci_mo = emb_cisd.make_rdm1()
@@ -663,20 +665,6 @@ def emb_ham(h, e, v):
 
     return hemb
 
-############################################################
-#               one-side log grid
-############################################################
-# generate a log grid between w0 and w (converges to w0)
-# return w0 + (w-w0)*l**(-i) where i ranges from 0 to num-1
-
-def gen_log_grid(w0, w, l, num):
-    grid = w0 + (w-w0) * l**(-np.arange(num,dtype=float))
-    if w > w0:
-        return grid[::-1]
-    else:
-        return grid
-
-comm.Barrier()
 
 ############################################################
 #   generate one-body part of embedding model Hamiltonian
@@ -692,26 +680,13 @@ nbath_per_ene = 3
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
 wlg = -0.6
-whg = 0.8
-log_disc_base = 1.5
+whg = 1.2
+log_disc_base = 2.0
+grid_type = 'custom1'
+wlog=0.01
     
 def gen_hemb(mu):
-    #------------ log discretization ------------
-    
-    # distance to mu
-    wl0 = mu - wlg
-    wh0 = whg - mu
-    
-    dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
-    
-    # number of energies above/below the Fermi level
-    nl = nbe//2 - dif
-    nh = nbe - nl
-    
-    grid = np.concatenate((gen_log_grid(mu, wlg, log_disc_base, nl), [mu], \
-            gen_log_grid(mu, whg, log_disc_base, nh)))
-    
-    
+    grid = gen_grid(nbe, wlg, whg, mu, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
     hemb = np.zeros((spin, nemb, nemb))
     
     # one body part

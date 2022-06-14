@@ -48,7 +48,7 @@ dw = freqs[1] - freqs[0]
 ############################################################
 #                   gate voltage
 ############################################################
-gate_label = 'gate0.001'
+gate_label = 'gate0.010'
 
 ############################################################
 #           read contact's mean-field data
@@ -413,26 +413,59 @@ def gen_log_grid(w0, w, l, num):
 ############################################################
 #------------ log discretization ------------
 wlg = -0.6
-whg = 0.8
+whg = 1.2
 nbe = 50 # total number of bath energies
 nbath_per_ene = 3
 
-log_disc_base = 1.5
+grid_type = 'custom1'
+log_disc_base = 2.0
+wlog = 0.01
 
-# distance to mu
-wl0 = mu - wlg
-wh0 = whg - mu
+grid = gen_grid(nbe, wlg, whg, mu, grid_type, log_disc_base, wlog=wlog)
 
-dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
+'''
+if grid_type == 'log':
+    log_disc_base = 1.6
+    
+    # distance to mu
+    wl0 = mu - wlg
+    wh0 = whg - mu
+    
+    dif = round(np.log(abs(wh0/wl0))/np.log(log_disc_base)) // 2
+    
+    # number of energies above/below the Fermi level
+    nl = nbe//2 - dif
+    nh = nbe - nl
+    grid = np.concatenate((gen_log_grid(mu, wlg, log_disc_base, nl), [mu], \
+            gen_log_grid(mu, whg, log_disc_base, nh)))
+elif grid_type == 'linear':
+    grid = np.linspace(wlg,whg,nbe+1)
+elif grid_type == 'custom1':
+    # log near Fermi level; linear elsewhere
+    log_disc_base = 1.8
+    
+    # energy window near Fermi level for log disc
+    w = 0.01
+    
+    # half side number of points in log disc (center point, mu, not included)
+    nw_log = (nbe+1) // 4 // 2
+    
+    # number of points in linear disc (boundary with log disc excluded)
+    nw_lin = nbe - nw_log*2
+    
+    # 2*nw_log+1 points
+    grid_log = np.concatenate((gen_log_grid(mu, mu-w, log_disc_base, nw_log), [mu], \
+            gen_log_grid(mu, mu+w, log_disc_base, nw_log)))
+    
+    dg_raw = (whg-wlg-2*w)/nw_lin
+    nl_lin = round( (mu-w-wlg)/dg_raw )
+    nh_lin = nw_lin - nl_lin
+    grid = np.concatenate( (np.linspace(wlg,mu-w,nl_lin+1), grid_log, np.linspace(mu+w,whg,nh_lin+1)) )
+    grid = np.array(sorted(list(set(list(grid)))))
+'''
+print('grid points:', grid)
+print('number of grids:', len(grid))
 
-# number of energies above/below the Fermi level
-nl = nbe//2 - dif
-nh = nbe - nl
-
-grid = np.concatenate((gen_log_grid(mu, wlg, log_disc_base, nl), [mu], \
-        gen_log_grid(mu, whg, log_disc_base, nh)))
-
-#grid = np.linspace(wlg,whg,nbe+1)
 
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
@@ -670,7 +703,7 @@ if spin == 1:
 
 wld = -0.4
 whd = 0.8
-nwd = 200
+nwd = 1000
 delta = 0.01
 freqs = np.linspace(wld,whd,nwd)
 
@@ -686,12 +719,12 @@ for s in range(spin):
 # raw mean-field LDoS from contact Green's function
 ldos = np.zeros((spin,nwd,nval_imp))
 for iw in range(nwd):
-    z = freqs[iw] + 1.5j*delta # FIXME need larger broadening?
+    z = freqs[iw] + 1j*delta # FIXME need larger broadening?
     GC = contact_Greens_function(z)
     for s in range(spin):
         ldos[s,iw,:] = -1./np.pi*np.diag(GC[s,:nval_imp, :nval_imp]).imag
 
-fh = h5py.File('imp_rks_ldos.h5', 'w')
+fh = h5py.File('imp_rks_ldos_nbe%i_nbpe%i.h5'%(nbe, nbath_per_ene), 'w')
 fh['freqs'] = freqs
 fh['A'] = A[0,:,:]
 fh['ldos'] = ldos[0,:,:]
