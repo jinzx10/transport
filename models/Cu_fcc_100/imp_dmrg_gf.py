@@ -28,10 +28,7 @@ mode = 'MODE'
 
 imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
 
-# whether perform an optimization or just a one-shot calculation
-opt_mu = OPT_MU
-
-# chemical potential (initial guess in optimization if opt_mu is True)
+# chemical potential of the embedding model
 mu0 = CHEM_POT if mode == 'production' else 0.05
 
 # DMRG scratch & save folder
@@ -666,12 +663,6 @@ def emb_ham(h, e, v):
     return hemb
 
 
-############################################################
-#   generate one-body part of embedding model Hamiltonian
-############################################################
-# given a chemical potential, this function choose a correponding
-# log grid to discretize the bath and generate hemb of size (spin, nemb, nemb)
-
 ########################################
 #   parameters for bath discretization
 ########################################
@@ -718,7 +709,6 @@ dm0[:,:nao_imp,:nao_imp] = DM_lo_imp.copy()
 ############################################################
 #               build embedding model
 ############################################################
-##########################
 def get_emb_mf(mu):
     mol = gto.M()
     mol.verbose = 4
@@ -746,40 +736,9 @@ def get_emb_mf(mu):
 
     return emb_mf
 
-##########################
-
-############################################################
-#               optimize chemical potential
-############################################################
-if opt_mu:
-    def dnelec(mu):
-        emb_mf = get_emb_mf(mu)
-        rdm = get_rdm_emb(emb_mf)
-        rdm_imp = rdm[0:nao_imp, 0:nao_imp]
-        nelec_imp_dmrg = np.trace(rdm_imp)
-        return nelec_imp_dmrg - nelec_lo_imp
-    
-    mu, flag = broydenroot(dnelec, mu0, tol = 0.001, max_iter = 20)
-    
-    if flag == 0:
-        print('optimized mu = ', mu)
-        print('nelec diff = ', dnelec(mu))
-    else:
-        print('current mu = ', mu)
-        print('nelec diff = ', dnelec(mu))
-        print('mu optimization failed!')
-else:
-    mu = mu0
-    print('no optimiziation is performed')
-    print('mu = ', mu)
-
+mu = mu0
+print('embedding model chemical potential mu = ', mu)
 emb_mf = get_emb_mf(mu)
-rdm = get_rdm_emb(emb_mf)
-rdm_imp = rdm[0:nao_imp, 0:nao_imp]
-nelec_imp_dmrg = np.trace(rdm_imp)
-print('nelec diff = ', nelec_imp_dmrg - nelec_lo_imp)
-
-#exit()
 
 ############################################################
 #       frequencies to compute spectra
@@ -822,90 +781,6 @@ for iw in range(nwa):
 
     for s in range(spin):
         ldos_mf[s,:,iw] = -1./np.pi*GC[s,:nao_imp, :nao_imp].diagonal().imag
-
-'''
-if rank == 0:
-    dfreq = all_freqs[1:] - all_freqs[:-1]
-    mf_int = np.sum(ldos_mf[:,:,:-1]*dfreq, axis=2)
-    print('integrated mean-field LDoS within (%6.4f, %6.4f) = '%(all_freqs[0], all_freqs[-1]), mf_int)
-
-    plt.plot(all_freqs, np.sum(ldos_mf[0], axis=0))
-    plt.show()
-
-exit()
-'''
-
-'''
-mol = gto.M()
-mol.verbose = 4
-mol.incore_anyway = True
-mol.build()
-
-emb_mf = scf_mu.RHF(mol, mu)
-emb_mf.get_hcore = lambda *args: hemb[0]
-emb_mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
-emb_mf.mo_energy = np.zeros([nemb])
-
-emb_mf.get_ovlp = lambda *args: np.eye(nemb)
-emb_mf.max_cycle = 150
-emb_mf.conv_tol = 1e-10
-emb_mf.diis_space = 15
-
-############################################################
-#           embedding model mean-field SCF
-############################################################
-emb_mf_fname = 'emb_mf_' + imp_atom + '.chk'
-if rank == 0: 
-    if os.path.isfile(emb_mf_fname):
-        print('ready to load emb_mf chkfile', emb_mf_fname)
-        emb_mf.__dict__.update( chkfile.load(emb_mf_fname, 'scf') )
-        print('mean field data loaded!')
-        print('one more extra scf step...')
-        emb_mf.kernel(emb_mf.make_rdm1())
-    else:
-        emb_mf.chkfile = emb_mf_fname
-        print('scf starts')
-        emb_mf.kernel(dm0[0])
-
-    print('scf finished')
-
-emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
-emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
-emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
-'''
-
-'''
-if rank == 0:
-    print('trace(dm_mf[imp val+virt])', np.trace(rdm[0:nao_imp,0:nao_imp]))
-    print('trace(dm_mf[imp val])', np.trace(rdm[0:nval_imp,0:nval_imp]))
-
-############################################################
-#           embedding model mean-field GF
-############################################################
-# HF GF in AO basis
-gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
-
-# here the ldos_mf is obtained by running HF SCF on the embedding model
-# which was constructed from DM originally converged with KS pbe0
-# so it's not real mean-field ldos
-ldos_mf_fake = np.zeros(nwa)
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*extra_delta
-    gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-    gf_hf[iw,:,:] = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-    ldos_mf_fake[iw] = -1./np.pi*gf_hf[iw,0,0].imag
-'''
-
-############################################################
-#               embedding model rdm
-############################################################
-
-if rank == 0:
-    print('DMRG nelec on imp (val+virt) = ', np.trace(rdm_imp))
-    print('DMRG nelec on imp (val)      = ', np.trace(rdm_imp[0:nval_imp, 0:nval_imp]))
-    print('DMRG imp rdm diagonal = ', rdm_imp.diagonal())
-
-#exit()
 
 
 ############################################################

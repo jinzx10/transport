@@ -64,12 +64,6 @@ gs_bond_dims = [400] * 5 + [800] * 5 + [1500] * 5 + [2000] * 5
 gs_tol = 1E-8
 gs_noises = [1E-3] * 5 + [1E-4] * 3 + [1e-7] * 2 + [0]
 
-# gf_bond_dims 1k~1.5k
-gf_n_steps = 8
-gf_bond_dims = [500] * 2 + [1000] * 4
-gf_tol = 1E-4
-gf_noises = [1E-4] * 2 + [1E-5] * 2 + [1E-7] * 2 + [0]
-
 gmres_tol = 1E-7
 
 cps_bond_dims = [2000]
@@ -110,7 +104,6 @@ def gen_cas(emb_mf):
     emb_cisd = ci.CISD(emb_mf)
     emb_cisd.max_cycle = 1000
     emb_cisd.max_space = 15
-    #emb_cisd.max_memory = 100000
     emb_cisd.conv_tol = 1e-9
     emb_cisd.verbose = 4
     
@@ -173,9 +166,9 @@ def gen_cas(emb_mf):
         _, v_canon_o = np.linalg.eigh(foo_no[-nocc_act:,-nocc_act:])
         
         # at this stage, no_coeff is bare MO-to-NO coefficient (before semi-canonicalization)
+        # we now transform it to AO-to-NO coefficient (with semi-canonicalization)
         no_coeff_v = emb_mf.mo_coeff[:,nocc:] @ no_coeff_v[:,:nvir_act] @ v_canon_v
         no_coeff_o = emb_mf.mo_coeff[:,:nocc] @ no_coeff_o[:,-nocc_act:] @ v_canon_o
-        # now no_coeff is AO-to-NO coefficient (with semi-canonicalization)
         
         ne_sum = np.sum(no_occ_o[no_idx_o]) + np.sum(no_occ_v[no_idx_v])
         nelectron = int(round(ne_sum))
@@ -185,12 +178,14 @@ def gen_cas(emb_mf):
         print('number of NOs: ', n_no)
     
     
-        # NOTE still do not understand scdm, but 'local' might be important!
+        # NOTE still do not understand scdm, but it might be important!
         no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
         no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
         no_coeff = np.concatenate((no_coeff_o, no_coeff_v), axis=1)
     
         print('natural orbital coefficients computed!')
+        print('natural orbital coefficients (val block):')
+        print(no_coeff[:6, :])
     
     # final natural orbital coefficients for CAS
     no_coeff = comm.bcast(no_coeff, root=0)
@@ -247,10 +242,10 @@ def get_rdm_emb(emb_mf):
 
     emb_mf_cas, no_coeff = gen_cas(emb_mf)
 
-    # low level dm in CAS space (natural orbital basis)
+    # low level CAS space DM (NO basis)
     dm_low_cas = emb_mf_cas.make_rdm1()
 
-    # low level dm in AO space
+    # low level total embedding DM (AO basis)
     dm_low = emb_mf.make_rdm1()
 
     max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
@@ -261,7 +256,7 @@ def get_rdm_emb(emb_mf):
         if not os.path.isdir(save_dir):
             os.mkdir(save_dir)
 
-    # DM within CAS
+    # high level CAS space DM (NO basis)
     dm_cas = dmrg_mo_pdm(emb_mf_cas, ao_orbs=range(0, n_no), mo_orbs=None, scratch=scratch, \
             reorder_method=reorder_method, n_threads=n_threads, memory=max_memory, \
             gs_bond_dims=gs_bond_dims, gs_n_steps=gs_n_steps, gs_tol=gs_tol, gs_noises=gs_noises, \
@@ -271,83 +266,16 @@ def get_rdm_emb(emb_mf):
     print('dm_cas.shape:', dm_cas.shape)
     dm_cas = dm_cas[0] + dm_cas[1]
 
-    # difference between high and low level DM for CAS space
+    # difference between high and low level CAS space DM (NO basis)
     ddm = dm_cas - dm_low_cas
     
     # transform the difference to AO basis
     ddm = no_coeff @ ddm @ no_coeff.T
 
-    # total embedding DM in AO space, equals to low-level dm plus high-level correction
+    # total embedding DM (AO basis), low-level dm plus high-level correction
     rdm = dm_low + ddm
 
     return rdm
-
-
-############################################################
-#           embedding model gf (AO basis)
-############################################################
-def get_gf_emb(emb_mf):
-    from fcdmft.solver.gfdmrg import dmrg_mo_gf
-
-    emb_mf_cas, no_coeff = gen_cas(emb_mf)
-
-    if rank == 0:
-        if not os.path.isdir(scratch):
-            os.mkdir(scratch)
-        if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
-
-    max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
-
-    # gf_dmrg_cas has dimension (n_no, n_no, nwa) (frequency is its last dimension)
-    dm_dmrg_cas, gf_dmrg_cas = dmrg_mo_gf( \
-            emb_mf_cas, freqs=freqs, delta=delta, ao_orbs=range(0,n_no), mo_orbs=None, \
-            extra_freqs=extra_freqs, extra_delta=extra_delta, scratch=scratch, add_rem='+-', \
-            n_threads=n_threads, reorder_method=reorder_method, memory=max_memory, \
-            gs_bond_dims=gs_bond_dims, gf_bond_dims=gf_bond_dims, gf_n_steps=gf_n_steps, \
-            gs_n_steps=gs_n_steps, gs_tol=gs_tol, gf_noises=gf_noises, gf_tol=gf_tol, \
-            gs_noises=gs_noises, gmres_tol=gmres_tol, load_dir=None, save_dir=save_dir, \
-            cps_bond_dims=cps_bond_dims, cps_noises=[0], cps_tol=gs_tol, cps_n_steps=gs_n_steps, \
-            verbose=3, mo_basis=False, ignore_ecore=False, n_off_diag_cg=n_off_diag_cg, \
-            mpi=True, dyn_corr_method=dyn_corr_method, ncore=ncore_dmrg, nvirt=nvirt_dmrg, diag_only=diag_only)
-
-    print('gf_dmrg_cas.shape', gf_dmrg_cas.shape)
-    
-    fh = h5py.File('gf_dmrg_cas_' + imp_atom + '.h5', 'w')
-    fh['gf_dmrg_cas'] = gf_dmrg_cas
-    fh.close()
-    
-    # hf gf in CAS space (in NO basis)
-    gf_hf_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-    for iw in range(nwa):
-        z = all_freqs[iw] + 1j*extra_delta
-        gf_mo_cas = np.diag( 1. / (z - emb_mf_cas.mo_energy) )
-        gf_hf_cas[iw,:,:] = emb_mf_cas.mo_coeff @ gf_mo_cas @ emb_mf_cas.mo_coeff.T
-
-    # NO active space self energy
-    sigma_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-    for iw in range(nwa):
-        sigma_cas[iw,:,:] = np.linalg.inv(gf_hf_cas[iw,:,:]) - np.linalg.inv(gf_dmrg_cas[:,:,iw])
-    
-    # convert sigma_cas to self energy in AO space
-    sigma_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        sigma_ao[iw,:,:] = no_coeff @ (sigma_cas[iw,:,:] @ no_coeff.T)
-    
-    # hf gf in AO basis
-    gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        z = all_freqs[iw] + 1j*extra_delta
-        gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-        gf_hf[iw,:,:] = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-
-    # final GF in AO space (contains active space DMRG self energy)
-    gf_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        gf_ao[iw,:,:] = np.linalg.inv( np.linalg.inv(gf_hf[iw,:,:]) - sigma_ao[iw,:,:] )
-
-    return gf_ao
-
 
 ############################################################
 #                   gate voltage
@@ -779,123 +707,6 @@ rdm_imp = rdm[0:nao_imp, 0:nao_imp]
 nelec_imp_dmrg = np.trace(rdm_imp)
 print('nelec diff = ', nelec_imp_dmrg - nelec_lo_imp)
 
-#exit()
-
-############################################################
-#       frequencies to compute spectra
-############################################################
-# coarse grid
-wl_freqs = mu - 0.01
-wh_freqs = mu + 0.01
-delta = 0.002
-nw = 20
-freqs = np.linspace(wl_freqs, wh_freqs, nw)
-dw = freqs[1] - freqs[0]
-
-extra_delta = 0.001
-extra_nw = 5
-extra_dw = dw / extra_nw
-
-extra_freqs = []
-for i in range(nw):
-    freqs_tmp = []
-    if extra_nw % 2 == 0:
-        for w in range(-extra_nw // 2, extra_nw // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    else:
-        for w in range(-(extra_nw-1) // 2, (extra_nw+1) // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    extra_freqs.append(np.array(freqs_tmp))
-
-all_freqs = np.array(sorted(list(set(list(freqs) + \
-        ([x for xx in extra_freqs for x in xx] if extra_freqs is not None else [])))))
-
-nwa = len(all_freqs)
-
-############################################################
-#       raw mean-field LDoS (from contact GF)
-############################################################
-ldos_mf = np.zeros((spin, nao_imp, nwa))
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*extra_delta
-    GC = contact_Greens_function(z)
-
-    for s in range(spin):
-        ldos_mf[s,:,iw] = -1./np.pi*GC[s,:nao_imp, :nao_imp].diagonal().imag
-
-'''
-if rank == 0:
-    dfreq = all_freqs[1:] - all_freqs[:-1]
-    mf_int = np.sum(ldos_mf[:,:,:-1]*dfreq, axis=2)
-    print('integrated mean-field LDoS within (%6.4f, %6.4f) = '%(all_freqs[0], all_freqs[-1]), mf_int)
-
-    plt.plot(all_freqs, np.sum(ldos_mf[0], axis=0))
-    plt.show()
-
-exit()
-'''
-
-'''
-mol = gto.M()
-mol.verbose = 4
-mol.incore_anyway = True
-mol.build()
-
-emb_mf = scf_mu.RHF(mol, mu)
-emb_mf.get_hcore = lambda *args: hemb[0]
-emb_mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
-emb_mf.mo_energy = np.zeros([nemb])
-
-emb_mf.get_ovlp = lambda *args: np.eye(nemb)
-emb_mf.max_cycle = 150
-emb_mf.conv_tol = 1e-10
-emb_mf.diis_space = 15
-
-############################################################
-#           embedding model mean-field SCF
-############################################################
-emb_mf_fname = 'emb_mf_' + imp_atom + '.chk'
-if rank == 0: 
-    if os.path.isfile(emb_mf_fname):
-        print('ready to load emb_mf chkfile', emb_mf_fname)
-        emb_mf.__dict__.update( chkfile.load(emb_mf_fname, 'scf') )
-        print('mean field data loaded!')
-        print('one more extra scf step...')
-        emb_mf.kernel(emb_mf.make_rdm1())
-    else:
-        emb_mf.chkfile = emb_mf_fname
-        print('scf starts')
-        emb_mf.kernel(dm0[0])
-
-    print('scf finished')
-
-emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
-emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
-emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
-'''
-
-'''
-if rank == 0:
-    print('trace(dm_mf[imp val+virt])', np.trace(rdm[0:nao_imp,0:nao_imp]))
-    print('trace(dm_mf[imp val])', np.trace(rdm[0:nval_imp,0:nval_imp]))
-
-############################################################
-#           embedding model mean-field GF
-############################################################
-# HF GF in AO basis
-gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
-
-# here the ldos_mf is obtained by running HF SCF on the embedding model
-# which was constructed from DM originally converged with KS pbe0
-# so it's not real mean-field ldos
-ldos_mf_fake = np.zeros(nwa)
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*extra_delta
-    gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-    gf_hf[iw,:,:] = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-    ldos_mf_fake[iw] = -1./np.pi*gf_hf[iw,0,0].imag
-'''
-
 ############################################################
 #               embedding model rdm
 ############################################################
@@ -904,26 +715,6 @@ if rank == 0:
     print('DMRG nelec on imp (val+virt) = ', np.trace(rdm_imp))
     print('DMRG nelec on imp (val)      = ', np.trace(rdm_imp[0:nval_imp, 0:nval_imp]))
     print('DMRG imp rdm diagonal = ', rdm_imp.diagonal())
-
-#exit()
-
-
-############################################################
-#               embedding model gf
-############################################################
-gf = get_gf_emb(emb_mf)
-ldos_dmrg = np.zeros((nwa, nao_imp))
-for iw in range(nwa):
-    gf_imp = gf[iw, :nao_imp, :nao_imp]
-    ldos_dmrg[iw,:] = -1./np.pi*gf_imp.diagonal().imag
-
-fh = h5py.File('ldos_dmrg_' + imp_atom + '_' + gate_label + '.h5', 'w')
-fh['all_freqs'] = all_freqs
-fh['ldos_dmrg'] = ldos_dmrg
-fh['ldos_mf'] = ldos_mf
-fh['mu'] = mu
-fh['gate'] = gate
-fh.close()
 
 exit()
 

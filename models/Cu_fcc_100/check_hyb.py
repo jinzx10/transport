@@ -29,7 +29,7 @@ mode = 'MODE'
 imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
 
 # whether perform an optimization or just a one-shot calculation
-opt_mu = OPT_MU
+opt_mu = OPT_MU if mode == 'production' else False
 
 # chemical potential (initial guess in optimization if opt_mu is True)
 mu0 = CHEM_POT if mode == 'production' else 0.05
@@ -38,7 +38,6 @@ mu0 = CHEM_POT if mode == 'production' else 0.05
 scratch = 'SCRATCH'
 save_dir = 'SAVEDIR'
 os.environ['TMPDIR'] = scratch
-os.environ['PYSCF_TMPDIR'] = scratch
 
 # number of active space occ/vir orbitals
 nocc_act = NOCC_ACT if mode == 'production' else 6
@@ -109,9 +108,9 @@ def gen_cas(emb_mf):
     
     emb_cisd = ci.CISD(emb_mf)
     emb_cisd.max_cycle = 1000
-    emb_cisd.max_space = 15
+    emb_cisd.max_space = 20
     #emb_cisd.max_memory = 100000
-    emb_cisd.conv_tol = 1e-9
+    emb_cisd.conv_tol = 1e-10
     emb_cisd.verbose = 4
     
     emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
@@ -359,7 +358,8 @@ gate_label = 'gate%5.3f'%(gate)
 #           read contact's mean-field data
 ############################################################
 #contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
-contact_dir = 'PREFIX/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
+prefix = 'PREFIX' if mode == 'production' else '/home/zuxin/'
+contact_dir = prefix + '/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
 if rank == 0:
     print('read contact\'s mean field data from', contact_dir)
 
@@ -475,7 +475,7 @@ print('mf number of electrons on imp:', nelec_lo_imp)
 ############################################################
 
 #bath_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/Cu/'
-bath_dir = 'PREFIX/projects/transport/models/Cu_fcc_100/Cu/'
+bath_dir = prefix + '/projects/transport/models/Cu_fcc_100/Cu/'
 
 if rank == 0:
     print('start reading lead mean field data from', bath_dir)
@@ -625,7 +625,7 @@ comm.Barrier()
 n_hyb = nao_imp
 
 # broadening for computing hybridization Gamma from self energy
-hyb_broadening= 0.01
+hyb_broadening= 0.02
 # -1/pi*imag(Sigma(e+i*delta))
 # (spin, n_hyb, n_hyb)
 def Gamma(e):
@@ -640,294 +640,59 @@ def Gamma(e):
     return -1./np.pi*Sigma_imp.imag
 
 ############################################################
-#       embedding Hamiltonian (one-body, spinless)
+#       TEST: rebuild Gamma by bath discretization
 ############################################################
-#FIXME the second dim of v is actually number of orbitals that couple to the bath
-# not nimp exactly if one selectively use only a few imp orb to calculation hyb
-
-# return a matrix of size (nemb,nemb) (does not have spin dimension!)
-def emb_ham(h, e, v):
-    nbe, nimp, nbath_per_ene = v.shape
-    nbath = len(e) * nbath_per_ene
-    nemb = nimp + nbath
-    hemb = np.zeros((nemb, nemb))
-    hemb[0:nimp, 0:nimp] = h[0:nimp, 0:nimp]
-    
-    # bath energy
-    for ibe in range(nbe):
-        for ib in range(nbath_per_ene):
-            hemb[nimp+ib*nbe+ibe,nimp+ib*nbe+ibe] = e[ibe]
-    
-    for i in range(nimp):
-        for ib in range(nbath_per_ene):
-            hemb[nimp+ib*nbe:nimp+(ib+1)*nbe,i] = v[:,i,ib]
-            hemb[i,nimp+ib*nbe:nimp+(ib+1)*nbe] = v[:,i,ib]
-
-    return hemb
-
-
-############################################################
-#   generate one-body part of embedding model Hamiltonian
-############################################################
-# given a chemical potential, this function choose a correponding
-# log grid to discretize the bath and generate hemb of size (spin, nemb, nemb)
-
-########################################
-#   parameters for bath discretization
-########################################
-nbe = 50 # total number of bath energies
-nbath_per_ene = 3
-nbath = nbe * nbath_per_ene
-nemb = nbath + nao_imp
+#------------ bath discretization ------------
+# evenly spaced grid
 wlg = -0.6
 whg = 1.2
-log_disc_base = 2.0
-grid_type = 'custom1'
-wlog=0.01
-    
-def gen_hemb(mu):
-    grid = gen_grid(nbe, wlg, whg, mu, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
-    hemb = np.zeros((spin, nemb, nemb))
-    
-    # one body part
-    for s in range(spin):
-        Gamma_s = lambda e: Gamma(e)[s]
-        e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
-        
-        hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
+nbe = 40
+grid = np.linspace(wlg,whg,nbe)
+nbath_per_ene = 3
 
-    if rank == 0:
-        print('bath energies = ', e)
-
-    return hemb
-
-
-############################################################
-#           electron repulsion integral
-############################################################
-# only non-zero on the impurity
-eri_imp = np.zeros([spin*(spin+1)//2, nemb, nemb, nemb, nemb])
-eri_imp[:,:nao_imp,:nao_imp,:nao_imp,:nao_imp] = eri_lo_imp
-
-############################################################
-#           embedding model DM initial guess
-############################################################
-dm0 = np.zeros((spin,nemb,nemb))
-dm0[:,:nao_imp,:nao_imp] = DM_lo_imp.copy()
-
-############################################################
-#               build embedding model
-############################################################
-##########################
-def get_emb_mf(mu):
-    mol = gto.M()
-    mol.verbose = 4
-    mol.incore_anyway = True
-    mol.build()
-
-    hemb = gen_hemb(mu)
-
-    emb_mf = scf_mu.RHF(mol, mu)
-    emb_mf.get_hcore = lambda *args: hemb[0]
-    emb_mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
-    emb_mf.mo_energy = np.zeros([nemb])
-    
-    emb_mf.get_ovlp = lambda *args: np.eye(nemb)
-    emb_mf.max_cycle = 150
-    emb_mf.conv_tol = 1e-10
-    emb_mf.diis_space = 15
-
-    if rank == 0:
-        emb_mf.kernel(dm0[0])
-
-    emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
-    emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
-    emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
-
-    return emb_mf
-
-##########################
-
-############################################################
-#               optimize chemical potential
-############################################################
-if opt_mu:
-    def dnelec(mu):
-        emb_mf = get_emb_mf(mu)
-        rdm = get_rdm_emb(emb_mf)
-        rdm_imp = rdm[0:nao_imp, 0:nao_imp]
-        nelec_imp_dmrg = np.trace(rdm_imp)
-        return nelec_imp_dmrg - nelec_lo_imp
-    
-    mu, flag = broydenroot(dnelec, mu0, tol = 0.001, max_iter = 20)
-    
-    if flag == 0:
-        print('optimized mu = ', mu)
-        print('nelec diff = ', dnelec(mu))
-    else:
-        print('current mu = ', mu)
-        print('nelec diff = ', dnelec(mu))
-        print('mu optimization failed!')
-else:
-    mu = mu0
-    print('no optimiziation is performed')
-    print('mu = ', mu)
-
-emb_mf = get_emb_mf(mu)
-rdm = get_rdm_emb(emb_mf)
-rdm_imp = rdm[0:nao_imp, 0:nao_imp]
-nelec_imp_dmrg = np.trace(rdm_imp)
-print('nelec diff = ', nelec_imp_dmrg - nelec_lo_imp)
-
-#exit()
-
-############################################################
-#       frequencies to compute spectra
-############################################################
-# coarse grid
-wl_freqs = mu - 0.01
-wh_freqs = mu + 0.01
-delta = 0.002
-nw = 20
-freqs = np.linspace(wl_freqs, wh_freqs, nw)
-dw = freqs[1] - freqs[0]
-
-extra_delta = 0.001
-extra_nw = 5
-extra_dw = dw / extra_nw
-
-extra_freqs = []
-for i in range(nw):
-    freqs_tmp = []
-    if extra_nw % 2 == 0:
-        for w in range(-extra_nw // 2, extra_nw // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    else:
-        for w in range(-(extra_nw-1) // 2, (extra_nw+1) // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    extra_freqs.append(np.array(freqs_tmp))
-
-all_freqs = np.array(sorted(list(set(list(freqs) + \
-        ([x for xx in extra_freqs for x in xx] if extra_freqs is not None else [])))))
-
-nwa = len(all_freqs)
-
-############################################################
-#       raw mean-field LDoS (from contact GF)
-############################################################
-ldos_mf = np.zeros((spin, nao_imp, nwa))
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*extra_delta
-    GC = contact_Greens_function(z)
-
-    for s in range(spin):
-        ldos_mf[s,:,iw] = -1./np.pi*GC[s,:nao_imp, :nao_imp].diagonal().imag
-
-'''
+# only test one spin component
+Gamma_s = lambda e: Gamma(e)[0]
+e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
+comm.Barrier()
 if rank == 0:
-    dfreq = all_freqs[1:] - all_freqs[:-1]
-    mf_int = np.sum(ldos_mf[:,:,:-1]*dfreq, axis=2)
-    print('integrated mean-field LDoS within (%6.4f, %6.4f) = '%(all_freqs[0], all_freqs[-1]), mf_int)
+    print('bath discretization finished')
+    print('e.shape = ', e.shape)
+    print('v.shape = ', v.shape)
+    print('bath energies = ', e)
+    print('')
 
-    plt.plot(all_freqs, np.sum(ldos_mf[0], axis=0))
+#------------ compare exact & rebuilt Gamma ------------
+# exact hybridization Gamma
+wl = -0.6
+wh = 1.2
+nw = 1000
+freqs = np.linspace(wl, wh, nw)
+hyb = np.zeros((nw, n_hyb, n_hyb))
+for iw in range(nw):
+    hyb[iw,:,:] = Gamma_s(freqs[iw])
+
+# rebuild Gamma
+gauss = lambda x,mu,sigma: 1.0/sigma/np.sqrt(2*np.pi)*np.exp(-0.5*((x-mu)/sigma)**2)
+eta=0.02
+
+Gamma_rebuilt = np.zeros((nw,n_hyb,n_hyb))
+for iw in range(nw):
+    for ib in range(len(e)):
+        for ie in range(nbath_per_ene):
+            Gamma_rebuilt[iw,:,:] += np.outer(v[ib,:,ie],v[ib,:,ie].conj()) * gauss(freqs[iw],e[ib],eta)
+
+if rank == 0:
+    for i in range(nval_imp):
+        plt.plot(freqs, hyb[:,i,i], linestyle=':', label='exact'+str(i), color='C'+str(i))
+        plt.plot(freqs, Gamma_rebuilt[:,i,i], linestyle='-', label='rebuilt'+str(i), color='C'+str(i))
+    
+    plt.xlim([wl,wh])
+    #plt.ylim([-0.01,0.3])
+    
+    fig = plt.gcf()
+    fig.set_size_inches(6,4)
+    
+    plt.legend()
     plt.show()
 
-exit()
-'''
-
-'''
-mol = gto.M()
-mol.verbose = 4
-mol.incore_anyway = True
-mol.build()
-
-emb_mf = scf_mu.RHF(mol, mu)
-emb_mf.get_hcore = lambda *args: hemb[0]
-emb_mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
-emb_mf.mo_energy = np.zeros([nemb])
-
-emb_mf.get_ovlp = lambda *args: np.eye(nemb)
-emb_mf.max_cycle = 150
-emb_mf.conv_tol = 1e-10
-emb_mf.diis_space = 15
-
-############################################################
-#           embedding model mean-field SCF
-############################################################
-emb_mf_fname = 'emb_mf_' + imp_atom + '.chk'
-if rank == 0: 
-    if os.path.isfile(emb_mf_fname):
-        print('ready to load emb_mf chkfile', emb_mf_fname)
-        emb_mf.__dict__.update( chkfile.load(emb_mf_fname, 'scf') )
-        print('mean field data loaded!')
-        print('one more extra scf step...')
-        emb_mf.kernel(emb_mf.make_rdm1())
-    else:
-        emb_mf.chkfile = emb_mf_fname
-        print('scf starts')
-        emb_mf.kernel(dm0[0])
-
-    print('scf finished')
-
-emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
-emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
-emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
-'''
-
-'''
-if rank == 0:
-    print('trace(dm_mf[imp val+virt])', np.trace(rdm[0:nao_imp,0:nao_imp]))
-    print('trace(dm_mf[imp val])', np.trace(rdm[0:nval_imp,0:nval_imp]))
-
-############################################################
-#           embedding model mean-field GF
-############################################################
-# HF GF in AO basis
-gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
-
-# here the ldos_mf is obtained by running HF SCF on the embedding model
-# which was constructed from DM originally converged with KS pbe0
-# so it's not real mean-field ldos
-ldos_mf_fake = np.zeros(nwa)
-for iw in range(nwa):
-    z = all_freqs[iw] + 1j*extra_delta
-    gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-    gf_hf[iw,:,:] = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-    ldos_mf_fake[iw] = -1./np.pi*gf_hf[iw,0,0].imag
-'''
-
-############################################################
-#               embedding model rdm
-############################################################
-
-if rank == 0:
-    print('DMRG nelec on imp (val+virt) = ', np.trace(rdm_imp))
-    print('DMRG nelec on imp (val)      = ', np.trace(rdm_imp[0:nval_imp, 0:nval_imp]))
-    print('DMRG imp rdm diagonal = ', rdm_imp.diagonal())
-
-#exit()
-
-
-############################################################
-#               embedding model gf
-############################################################
-gf = get_gf_emb(emb_mf)
-ldos_dmrg = np.zeros((nwa, nao_imp))
-for iw in range(nwa):
-    gf_imp = gf[iw, :nao_imp, :nao_imp]
-    ldos_dmrg[iw,:] = -1./np.pi*gf_imp.diagonal().imag
-
-fh = h5py.File('ldos_dmrg_' + imp_atom + '_' + gate_label + '.h5', 'w')
-fh['all_freqs'] = all_freqs
-fh['ldos_dmrg'] = ldos_dmrg
-fh['ldos_mf'] = ldos_mf
-fh['mu'] = mu
-fh['gate'] = gate
-fh.close()
-
-exit()
-
-############################################################
-#                   end of main
-############################################################
 
