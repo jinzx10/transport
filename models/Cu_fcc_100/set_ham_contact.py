@@ -270,6 +270,8 @@ if mf_load_fname is not None:
     print('load saved mf data', mf_load_fname)
     mf.__dict__.update(mf_data)
     mf = mf.newton()
+    mf.max_cycle = 150
+    mf.conv_tol = 1e-12
     mf.canonicalization = False
     mf.chkfile = mf_save_fname
     mf.kernel()
@@ -286,11 +288,19 @@ else:
 
     mf = mf.newton()
     mf.max_cycle = 150
+    mf.conv_tol = 1e-12
     mf.canonicalization = False
     mf.chkfile = mf_save_fname
     mf.kernel(dm0=dm0)
 
 
+###############################################
+#           HOMO/LUMO energy
+###############################################
+nocc = nelec // 2
+
+print('E(homo) = %6.3f, occ(homo) = %6.3f'%(mf.mo_energy[nocc-1], mf.mo_occ[nocc-1]))
+print('E(lumo) = %6.3f, occ(lumo) = %6.3f'%(mf.mo_energy[nocc], mf.mo_occ[nocc]))
 
 ###############################################
 #       convergence sanity check begin
@@ -517,7 +527,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot MO and LO
 ############################################################
-plot_orb = False
+plot_orb = PLOT_ORB if mode == 'production' else False
 
 if plot_orb:
     plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + gate_label
@@ -702,8 +712,9 @@ print('hcore_lo_imp.shape = ', np.asarray(fh['hcore_lo_imp']).shape)
 print('JK_lo.shape = ', np.asarray(fh['JK_lo']).shape)
 print('JK_lo_imp.shape = ', np.asarray(fh['JK_lo_imp']).shape)
 
-print('JK_lo_hf.shape = ', np.asarray(fh['JK_lo_hf']).shape)
-print('JK_lo_hf_imp.shape = ', np.asarray(fh['JK_lo_hf_imp']).shape)
+if use_dft:
+    print('JK_lo_hf.shape = ', np.asarray(fh['JK_lo_hf']).shape)
+    print('JK_lo_hf_imp.shape = ', np.asarray(fh['JK_lo_hf_imp']).shape)
 
 fh.close()
 

@@ -17,6 +17,7 @@ from pyscf.pbc.lib import chkfile as pbcchkfile
 from utils.surface_green import *
 from utils.bath_disc import *
 from utils.broydenroot import *
+from utils.emb_helper import *
 
 from pyscf.scf.hf import eig as eiggen
 
@@ -29,7 +30,8 @@ mode = 'MODE'
 imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
 
 # chemical potential of the embedding model
-mu0 = CHEM_POT if mode == 'production' else 0.05
+mu0 = CHEM_POT if mode == 'production' else 0.19
+mu_label = 'mu%5.3f'%(mu0)
 
 # DMRG scratch & save folder
 scratch = 'SCRATCH'
@@ -48,9 +50,6 @@ n_no = nocc_act + nvir_act
 ######################################
 # NOTE scratch conflict for different job!
 # NOTE verbose=3 good enough
-# NOTE extra_freqs & extra_delta are set below
-#extra_freqs = None
-#extra_delta = None
 n_threads = NUM_THREADS if mode == 'production' else 8
 reorder_method='gaopt'
 
@@ -84,49 +83,104 @@ diag_only= False
 
 
 ############################################################
-#           an unknown auxiliary function
+#                   gate voltage
 ############################################################
-def scdm(coeff, overlap):
-    from pyscf import lo
-    aux = lo.orth.lowdin(overlap)
-    no = coeff.shape[1]
-    ova = coeff.T @ overlap @ aux
-    piv = scipy.linalg.qr(ova, pivoting=True)[2]
-    bc = ova[:, piv[:no]]
-    ova = np.dot(bc.T, bc)
-    s12inv = lo.orth.lowdin(ova)
-    return coeff @ bc @ s12inv
+gate = GATE if mode == 'production' else 0
+gate_label = 'gate%5.3f'%(gate)
+
+
+############################################################
+#       frequencies to compute spectra
+############################################################
+# coarse grid
+# total: -0.4 to 0.55
+
+
+#  wl     wh    nw
+# -0.40  -0.25  4
+# -0.20  -0.05  4
+#  0.00   0.15  4
+#  0.20   0.35  4
+#  0.40   0.55  4
+
+segment = SEGMENT if mode == 'production' else 0
+
+#wl_freqs = -0.4
+#wh_freqs = -0.25
+wl_freqs = -0.4 + segment*0.2
+wh_freqs = -0.25 + segment*0.2
+delta = 0.02
+nw = 4
+freqs = np.linspace(wl_freqs, wh_freqs, nw)
+dw = freqs[1] - freqs[0]
+
+extra_delta = 0.02
+extra_nw = 5
+extra_dw = dw / extra_nw
+
+
+#wl_freqs = mu - 0.01
+#wh_freqs = mu + 0.01
+#delta = 0.002
+#nw = 20
+#freqs = np.linspace(wl_freqs, wh_freqs, nw)
+#dw = freqs[1] - freqs[0]
+#
+#extra_delta = 0.001
+#extra_nw = 5
+#extra_dw = dw / extra_nw
+
+extra_freqs = []
+for i in range(nw):
+    freqs_tmp = []
+    if extra_nw % 2 == 0:
+        for w in range(-extra_nw // 2, extra_nw // 2):
+            freqs_tmp.append(freqs[i] + extra_dw * w)
+    else:
+        for w in range(-(extra_nw-1) // 2, (extra_nw+1) // 2):
+            freqs_tmp.append(freqs[i] + extra_dw * w)
+    extra_freqs.append(np.array(freqs_tmp))
+
+all_freqs = np.array(sorted(list(set(list(freqs) + \
+        ([x for xx in extra_freqs for x in xx] if extra_freqs is not None else [])))))
+
+nwa = len(all_freqs)
+
 
 ############################################################
 #           CAS from CISD natural orbital
 ############################################################
-def gen_cas(emb_mf):
+def gen_cas_cisd(emb_mf):
 
     from pyscf import ci
     
     emb_cisd = ci.CISD(emb_mf)
     emb_cisd.max_cycle = 1000
+    emb_cisd.conv_tol = 1e-10
     emb_cisd.max_space = 15
-    #emb_cisd.max_memory = 100000
-    emb_cisd.conv_tol = 1e-9
-    emb_cisd.verbose = 4
+    emb_cisd.level_shift = 0.1
+    emb_cisd.verbose = 6
     
-    emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
+    emb_cisd_fname = 'emb_cisd_' + imp_atom + '_' + gate_label + '_' + mu_label + '.chk'
     if rank == 0:
-        '''
         if os.path.isfile(emb_cisd_fname):
             print('load CISD data from', emb_cisd_fname)
             emb_cisd.__dict__.update( chkfile.load(emb_cisd_fname, 'cisd') )
+            emb_cisd.kernel(ci0=emb_cisd.ci)
         else:
             emb_cisd.chkfile = emb_cisd_fname
-            print('CISD starts')
+            print('CISD starts from scratch')
             emb_cisd.kernel()
-            emb_cisd.dump_chk()
-        '''
-        # always run CISD from scratch
-        print('CISD starts')
-        print('CISD max_memory = ', emb_cisd.max_memory)
-        emb_cisd.kernel()
+
+        emb_cisd.dump_chk()
+
+        ## always run CISD from scratch
+        #print('CISD starts')
+        #print('CISD max_memory = ', emb_cisd.max_memory)
+        #emb_cisd.kernel()
+
+        #emb_cisd.chkfile = emb_cisd_fname
+        #emb_cisd.dump_chk()
     
         dm_ci_mo = emb_cisd.make_rdm1()
         
@@ -237,56 +291,12 @@ def gen_cas(emb_mf):
 
 
 ############################################################
-#               embedding rdm
-############################################################
-def get_rdm_emb(emb_mf):
-    from fcdmft.solver.gfdmrg import dmrg_mo_pdm
-
-    emb_mf_cas, no_coeff = gen_cas(emb_mf)
-
-    # low level dm in CAS space (natural orbital basis)
-    dm_low_cas = emb_mf_cas.make_rdm1()
-
-    # low level dm in AO space
-    dm_low = emb_mf.make_rdm1()
-
-    max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
-
-    if rank == 0:
-        if not os.path.isdir(scratch):
-            os.mkdir(scratch)
-        if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
-
-    # DM within CAS
-    dm_cas = dmrg_mo_pdm(emb_mf_cas, ao_orbs=range(0, n_no), mo_orbs=None, scratch=scratch, \
-            reorder_method=reorder_method, n_threads=n_threads, memory=max_memory, \
-            gs_bond_dims=gs_bond_dims, gs_n_steps=gs_n_steps, gs_tol=gs_tol, gs_noises=gs_noises, \
-            load_dir=None, save_dir=save_dir, verbose=3, mo_basis=False, ignore_ecore=False, \
-            mpi=True, dyn_corr_method=dyn_corr_method, ncore=ncore_dmrg, nvirt=nvirt_dmrg)
-
-    print('dm_cas.shape:', dm_cas.shape)
-    dm_cas = dm_cas[0] + dm_cas[1]
-
-    # difference between high and low level DM for CAS space
-    ddm = dm_cas - dm_low_cas
-    
-    # transform the difference to AO basis
-    ddm = no_coeff @ ddm @ no_coeff.T
-
-    # total embedding DM in AO space, equals to low-level dm plus high-level correction
-    rdm = dm_low + ddm
-
-    return rdm
-
-
-############################################################
 #           embedding model gf (AO basis)
 ############################################################
 def get_gf_emb(emb_mf):
     from fcdmft.solver.gfdmrg import dmrg_mo_gf
 
-    emb_mf_cas, no_coeff = gen_cas(emb_mf)
+    emb_mf_cas, no_coeff = gen_cas_cisd(emb_mf)
 
     if rank == 0:
         if not os.path.isdir(scratch):
@@ -310,9 +320,9 @@ def get_gf_emb(emb_mf):
 
     print('gf_dmrg_cas.shape', gf_dmrg_cas.shape)
     
-    fh = h5py.File('gf_dmrg_cas_' + imp_atom + '.h5', 'w')
+    #--------------- file opened ---------------------------
+    fh = h5py.File('gf_dmrg_cas_' + imp_atom + '_' + gate_label + '.h5', 'w')
     fh['gf_dmrg_cas'] = gf_dmrg_cas
-    fh.close()
     
     # hf gf in CAS space (in NO basis)
     gf_hf_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
@@ -331,6 +341,10 @@ def get_gf_emb(emb_mf):
     for iw in range(nwa):
         sigma_ao[iw,:,:] = no_coeff @ (sigma_cas[iw,:,:] @ no_coeff.T)
     
+    fh['sigma_ao'] = sigma_ao
+    fh.close()
+    #--------------- file closed ---------------------------
+
     # hf gf in AO basis
     gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
     for iw in range(nwa):
@@ -345,12 +359,6 @@ def get_gf_emb(emb_mf):
 
     return gf_ao
 
-
-############################################################
-#                   gate voltage
-############################################################
-gate = GATE if mode == 'production' else 0
-gate_label = 'gate%5.3f'%(gate)
 
 ############################################################
 #           read contact's mean-field data
@@ -559,6 +567,7 @@ comm.Barrier()
 ############################################################
 hcore_lo_imp = 1./nkpts * np.sum(hcore_lo_imp, axis=1)
 JK_lo_hf_imp = 1./nkpts * np.sum(JK_lo_hf_imp, axis=1)
+JK_lo_ks_imp = 1./nkpts * np.sum(JK_lo_ks_imp, axis=1)
 DM_lo_imp = 1./nkpts * np.sum(DM_lo_imp, axis=1)
 
 JK_00 = scf_mu._get_veff(DM_lo_imp, eri_lo_imp)
@@ -587,9 +596,11 @@ comm.Barrier()
 ############################################################
 hcore_lo_contact = 1./nkpts * np.sum(hcore_lo_contact, axis=1)
 JK_lo_hf_contact = 1./nkpts * np.sum(JK_lo_hf_contact, axis=1)
+JK_lo_ks_contact = 1./nkpts * np.sum(JK_lo_ks_contact, axis=1)
 
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
+    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
     print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('')
 
@@ -613,6 +624,25 @@ def contact_Greens_function(z):
                 - Sigma_L - Sigma_R )
     return G_C
 
+def contact_Greens_function_ks(z):
+    g00 = Umerski1997(z, H00, H01)
+
+    V_L = np.zeros((nao_contact, nao_ppl), dtype=complex)
+    V_R = np.zeros((nao_contact, nao_ppl), dtype=complex)
+
+    V_L[nao_imp:nao_imp+nao_ppl,:] = H01.T.conj()
+    V_R[-nao_ppl:,:] = H01
+
+    Sigma_L = V_L @ g00 @ V_L.T.conj()
+    Sigma_R = V_R @ g00 @ V_R.T.conj()
+
+    # contact block of the Green's function
+    G_C = np.zeros((spin, nao_contact, nao_contact), dtype=complex)
+    for s in range(spin):
+        G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] \
+                - Sigma_L - Sigma_R )
+    return G_C
+
 comm.Barrier()
 
 ############################################################
@@ -622,8 +652,8 @@ comm.Barrier()
 n_hyb = nao_imp
 
 # broadening for computing hybridization Gamma from self energy
-hyb_broadening= 0.01
-# -1/pi*imag(Sigma(e+i*delta))
+hyb_broadening= 0.002
+# -1/pi*imag(Sigma(e+i*hyb_broadening))
 # (spin, n_hyb, n_hyb)
 def Gamma(e):
     z = e + 1j*hyb_broadening
@@ -636,32 +666,6 @@ def Gamma(e):
 
     return -1./np.pi*Sigma_imp.imag
 
-############################################################
-#       embedding Hamiltonian (one-body, spinless)
-############################################################
-#FIXME the second dim of v is actually number of orbitals that couple to the bath
-# not nimp exactly if one selectively use only a few imp orb to calculation hyb
-
-# return a matrix of size (nemb,nemb) (does not have spin dimension!)
-def emb_ham(h, e, v):
-    nbe, nimp, nbath_per_ene = v.shape
-    nbath = len(e) * nbath_per_ene
-    nemb = nimp + nbath
-    hemb = np.zeros((nemb, nemb))
-    hemb[0:nimp, 0:nimp] = h[0:nimp, 0:nimp]
-    
-    # bath energy
-    for ibe in range(nbe):
-        for ib in range(nbath_per_ene):
-            hemb[nimp+ib*nbe+ibe,nimp+ib*nbe+ibe] = e[ibe]
-    
-    for i in range(nimp):
-        for ib in range(nbath_per_ene):
-            hemb[nimp+ib*nbe:nimp+(ib+1)*nbe,i] = v[:,i,ib]
-            hemb[i,nimp+ib*nbe:nimp+(ib+1)*nbe] = v[:,i,ib]
-
-    return hemb
-
 
 ########################################
 #   parameters for bath discretization
@@ -670,8 +674,8 @@ nbe = 50 # total number of bath energies
 nbath_per_ene = 3
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
-wlg = -0.6
-whg = 1.2
+wlg = -0.4
+whg = 0.6
 log_disc_base = 2.0
 grid_type = 'custom1'
 wlog=0.01
@@ -683,7 +687,7 @@ def gen_hemb(mu):
     # one body part
     for s in range(spin):
         Gamma_s = lambda e: Gamma(e)[s]
-        e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
+        e,v = direct_disc_hyb(Gamma_s, grid, nint=10, nbath_per_ene=nbath_per_ene)
         
         hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
 
@@ -701,12 +705,6 @@ eri_imp = np.zeros([spin*(spin+1)//2, nemb, nemb, nemb, nemb])
 eri_imp[:,:nao_imp,:nao_imp,:nao_imp,:nao_imp] = eri_lo_imp
 
 ############################################################
-#           embedding model DM initial guess
-############################################################
-dm0 = np.zeros((spin,nemb,nemb))
-dm0[:,:nao_imp,:nao_imp] = DM_lo_imp.copy()
-
-############################################################
 #               build embedding model
 ############################################################
 def get_emb_mf(mu):
@@ -716,6 +714,13 @@ def get_emb_mf(mu):
     mol.build()
 
     hemb = gen_hemb(mu)
+
+    # dm initial guess
+    #iocc = np.array(hemb[0].diagonal() < mu, dtype=float)
+    #dm_init = np.diag(iocc) * 2.0
+    #dm_init[:nao_imp,:nao_imp] = DM_lo_imp.copy()
+    dm_init = np.zeros((nemb,nemb))
+    dm_init[:nao_imp,:nao_imp] = DM_lo_imp.copy()
 
     emb_mf = scf_mu.RHF(mol, mu)
     emb_mf.get_hcore = lambda *args: hemb[0]
@@ -728,7 +733,20 @@ def get_emb_mf(mu):
     emb_mf.diis_space = 15
 
     if rank == 0:
-        emb_mf.kernel(dm0[0])
+        ## newton-diis-newton to ensure convergence
+        #emb_mf_newton = emb_mf.newton()
+        #emb_mf_newton.max_cycle = 150
+        #emb_mf_newton.canonicalization = False
+        #emb_mf_newton.kernel(dm0=dm_init)
+        #dm0 = emb_mf_newton.make_rdm1()
+
+        #emb_mf.kernel(dm0=dm0)
+        #dm0 = emb_mf.make_rdm1()
+
+        #emb_mf = emb_mf.newton()
+        #emb_mf.canonicalization = False
+        #emb_mf.kernel(dm0=dm0)
+        emb_mf.kernel(dm_init)
 
     emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
     emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
@@ -736,52 +754,42 @@ def get_emb_mf(mu):
 
     return emb_mf
 
+#***********************************************************
+#               calculation starts !
+#***********************************************************
 mu = mu0
 print('embedding model chemical potential mu = ', mu)
 emb_mf = get_emb_mf(mu)
 
 ############################################################
-#       frequencies to compute spectra
+#           HF LDoS (from contact GF)
 ############################################################
-# coarse grid
-wl_freqs = mu - 0.01
-wh_freqs = mu + 0.01
-delta = 0.002
-nw = 20
-freqs = np.linspace(wl_freqs, wh_freqs, nw)
-dw = freqs[1] - freqs[0]
-
-extra_delta = 0.001
-extra_nw = 5
-extra_dw = dw / extra_nw
-
-extra_freqs = []
-for i in range(nw):
-    freqs_tmp = []
-    if extra_nw % 2 == 0:
-        for w in range(-extra_nw // 2, extra_nw // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    else:
-        for w in range(-(extra_nw-1) // 2, (extra_nw+1) // 2):
-            freqs_tmp.append(freqs[i] + extra_dw * w)
-    extra_freqs.append(np.array(freqs_tmp))
-
-all_freqs = np.array(sorted(list(set(list(freqs) + \
-        ([x for xx in extra_freqs for x in xx] if extra_freqs is not None else [])))))
-
-nwa = len(all_freqs)
-
-############################################################
-#       raw mean-field LDoS (from contact GF)
-############################################################
-ldos_mf = np.zeros((spin, nao_imp, nwa))
+ldos_hf = np.zeros((nwa, nao_imp))
 for iw in range(nwa):
     z = all_freqs[iw] + 1j*extra_delta
     GC = contact_Greens_function(z)
+    ldos_hf[iw,:] = -1./np.pi*GC[0,:nao_imp, :nao_imp].diagonal().imag
 
-    for s in range(spin):
-        ldos_mf[s,:,iw] = -1./np.pi*GC[s,:nao_imp, :nao_imp].diagonal().imag
 
+############################################################
+#           KS LDoS (from contact GF)
+############################################################
+ldos_ks = np.zeros((nwa, nao_imp))
+for iw in range(nwa):
+    z = all_freqs[iw] + 1j*extra_delta
+    GC = contact_Greens_function_ks(z)
+    ldos_ks[iw,:] = -1./np.pi*GC[0,:nao_imp, :nao_imp].diagonal().imag
+
+
+############################################################
+#       mf-LDoS3: embedding model HF-solved LDoS
+############################################################
+ldos_hf_emb = np.zeros((nwa, nao_imp))
+for iw in range(nwa):
+    z = all_freqs[iw] + 1j*extra_delta
+    gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
+    gf_ao = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
+    ldos_hf_emb[iw,:] = -1./np.pi * gf_ao[:nao_imp, :nao_imp].diagonal().imag
 
 ############################################################
 #               embedding model gf
@@ -793,9 +801,11 @@ for iw in range(nwa):
     ldos_dmrg[iw,:] = -1./np.pi*gf_imp.diagonal().imag
 
 fh = h5py.File('ldos_dmrg_' + imp_atom + '_' + gate_label + '.h5', 'w')
-fh['all_freqs'] = all_freqs
+fh['freqs'] = all_freqs
 fh['ldos_dmrg'] = ldos_dmrg
-fh['ldos_mf'] = ldos_mf
+fh['ldos_hf'] = ldos_hf
+fh['ldos_hf_emb'] = ldos_hf_emb
+fh['ldos_ks'] = ldos_ks
 fh['mu'] = mu
 fh['gate'] = gate
 fh.close()

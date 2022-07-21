@@ -8,23 +8,18 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 
 from pyscf import gto, ao2mo, cc, scf, dft
+from pyscf.lib import chkfile
 
 from pyscf.pbc import scf as pbcscf
 from pyscf.pbc import df as pbcdf
-from pyscf.pbc.lib import chkfile
+from pyscf.pbc.lib import chkfile as pbcchkfile
 
-from utils.diis import diis
 from utils.surface_green import *
 from utils.bath_disc import *
+from utils.broydenroot import *
 from utils.emb_helper import *
 
 from pyscf.scf.hf import eig as eiggen
-
-############################################################
-# this script performs a sanity check to make sure that
-# the embedding model solved by the same mf method (ks)
-# recovers the imp block as in the original contact calculation
-############################################################
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -32,20 +27,185 @@ nprocs = comm.Get_size()
 
 imp_atom = 'Co'
 
-# chemical potential
+
+# chemical potential 
 mu = 0.06
 
-# with lead or not
-with_lead = False
 
-# center of bath discretization
-disc_center = 0.1829
+# number of active space occ/vir orbitals
+nocc_act = 6 
+nvir_act = 9
+n_no = nocc_act + nvir_act
+
 
 ############################################################
 #                   gate voltage
 ############################################################
-gate = 0.000
+gate = 0.000 
 gate_label = 'gate%5.3f'%(gate)
+
+############################################################
+#           CAS from CISD natural orbital
+############################################################
+def gen_cas_cisd(emb_mf):
+
+    from pyscf import ci
+    
+    emb_cisd = ci.CISD(emb_mf)
+    emb_cisd.max_cycle = 500
+    emb_cisd.max_space = 8
+    emb_cisd.conv_tol = 1e-8
+    emb_cisd.verbose = 4
+    
+    emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
+
+    if os.path.isfile(emb_cisd_fname):
+        print('load CISD data from', emb_cisd_fname)
+        emb_cisd.__dict__.update( chkfile.load(emb_cisd_fname, 'cisd') )
+    else:
+        emb_cisd.chkfile = emb_cisd_fname
+        print('CISD starts')
+        emb_cisd.kernel()
+        emb_cisd.dump_chk()
+
+    ## always run CISD from scratch
+    #print('CISD starts')
+    #print('CISD max_memory = ', emb_cisd.max_memory)
+    #emb_cisd.kernel()
+    
+    dm_ci_mo = emb_cisd.make_rdm1()
+    
+    nmo = emb_cisd.nmo
+    nocc = emb_cisd.nocc # number of occupied MO
+    print('nocc = ', nocc)
+    print('nmo = ', nmo)
+    
+    print('dm_ci_mo.shape = ', dm_ci_mo.shape)
+    
+    # find natural orbital coefficients below
+    
+    # dm_ci_mo virtual block
+    no_occ_v, no_coeff_v = np.linalg.eigh(dm_ci_mo[nocc:,nocc:])
+    no_occ_v = np.flip(no_occ_v) # sort eigenvalues from large to small
+    no_coeff_v = np.flip(no_coeff_v, axis=1)
+    print('vir NO occupancy:', no_occ_v)
+    
+    # occupied block
+    no_occ_o, no_coeff_o = np.linalg.eigh(dm_ci_mo[:nocc,:nocc])
+    no_occ_o = np.flip(no_occ_o)
+    no_coeff_o = np.flip(no_coeff_o, axis=1)
+    print('occ NO occupancy:', no_occ_o)
+    
+    # use natural orbitals closest to the Fermi level
+    # these indices are within their own block (say, no_idx_v starts from 0)
+    no_idx_v = range(0, nvir_act)
+    no_idx_o = range(nocc-nocc_act, nocc)
+    
+    print('no_idx_v = ', no_idx_v)
+    print('no_idx_o = ', no_idx_o)
+    
+    # semi-canonicalization
+    # rotate occ/vir NOs so that they diagonalize the Fock matrix within their subspace
+    fvv = np.diag(emb_mf.mo_energy[nocc:])
+    fvv_no = no_coeff_v.T @ fvv @ no_coeff_v
+    _, v_canon_v = np.linalg.eigh(fvv_no[:nvir_act,:nvir_act])
+    
+    foo = np.diag(emb_mf.mo_energy[:nocc])
+    foo_no = no_coeff_o.T @ foo @ no_coeff_o
+    _, v_canon_o = np.linalg.eigh(foo_no[-nocc_act:,-nocc_act:])
+    
+    # at this stage, no_coeff is bare MO-to-NO coefficient (before semi-canonicalization)
+    # we now transform it to AO-to-NO coefficient (with semi-canonicalization)
+    no_coeff_v = emb_mf.mo_coeff[:,nocc:] @ no_coeff_v[:,:nvir_act] @ v_canon_v
+    no_coeff_o = emb_mf.mo_coeff[:,:nocc] @ no_coeff_o[:,-nocc_act:] @ v_canon_o
+    
+    ne_sum = np.sum(no_occ_o[no_idx_o]) + np.sum(no_occ_v[no_idx_v])
+    nelectron = int(round(ne_sum))
+    
+    print('number of electrons in NO: ', ne_sum)
+    print('number of electrons: ', nelectron)
+    print('number of NOs: ', n_no)
+    
+    casno_cisd_fname = 'casno_cisd.h5'
+    fh = h5py.File(casno_cisd_fname, 'w')
+
+    fh['dm_ci_mo'] = dm_ci_mo
+    fh['no_coeff_v_raw'] = no_coeff_v
+    fh['no_coeff_o_raw'] = no_coeff_o
+    
+    # NOTE still do not understand scdm, but it might be important!
+    no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
+    no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
+    no_coeff = np.concatenate((no_coeff_o, no_coeff_v), axis=1)
+    
+    fh['no_coeff_v_scdm'] = no_coeff_v
+    fh['no_coeff_o_scdm'] = no_coeff_o
+    fh.close()
+
+    print('natural orbital coefficients computed!')
+    print('natural orbital coefficients (val block):')
+    print(no_coeff[:6, :])
+    
+    # final natural orbital coefficients for CAS
+    no_coeff = comm.bcast(no_coeff, root=0)
+
+    # new mf object for CAS
+    # first build CAS mol object
+    mol_cas = gto.M()
+    mol_cas.nelectron = nelectron
+    mol_cas.verbose = 4
+    mol_cas.symmetry = 'c1'
+    mol_cas.incore_anyway = True
+    emb_mf_cas = scf.RHF(mol_cas)
+    
+    # hcore & eri in NO basis
+    h1e = no_coeff.T @ (emb_mf.get_hcore() @ no_coeff)
+    g2e = ao2mo.restore(8, ao2mo.kernel(emb_mf._eri, no_coeff), n_no)
+
+    #########
+    no_idx_tmp = range(nocc-nocc_act, nocc+nvir_act)
+    no_coeff_tmp = emb_mf.mo_coeff[:, no_idx_tmp]
+    tmp2 = ao2mo.kernel(emb_mf._eri, no_coeff_tmp)
+    tmp1 = ao2mo.kernel(emb_mf._eri, no_coeff)
+    print('shape2 = ', tmp2.shape)
+    print('shape1 = ', tmp1.shape)
+    m2 = np.reshape(tmp2, (n_no**2,n_no**2))
+    m1 = np.reshape(tmp1, (n_no**2, n_no**2))
+    print('norm 2 = ', np.linalg.norm(m2))
+    print('norm 1 = ', np.linalg.norm(m1))
+    #########
+    exit()
+    
+    
+    dm_hf = emb_mf.make_rdm1()
+    dm_cas_no = no_coeff.T @ dm_hf @ no_coeff
+    JK_cas_no = scf_mu._get_veff(dm_cas_no, g2e)[0]
+    JK_full_no = no_coeff.T @ emb_mf.get_veff() @ no_coeff
+    h1e = h1e + JK_full_no - JK_cas_no
+    h1e = 0.5 * (h1e + h1e.T)
+    
+    h1e = comm.bcast(h1e, root=0)
+    g2e = comm.bcast(g2e, root=0)
+    
+    # set up integrals for emb_mf_cas
+    emb_mf_cas.get_hcore = lambda *args: h1e
+    emb_mf_cas.get_ovlp = lambda *args: np.eye(n_no)
+    emb_mf_cas._eri = g2e
+    
+    if rank == 0:
+        print('scf within CAS')
+        emb_mf_cas.kernel(dm0=dm_cas_no)
+        print('scf within CAS finished!')
+    comm.Barrier()
+    
+    emb_mf_cas.mo_occ = comm.bcast(emb_mf_cas.mo_occ, root=0)
+    emb_mf_cas.mo_energy = comm.bcast(emb_mf_cas.mo_energy, root=0)
+    emb_mf_cas.mo_coeff = comm.bcast(emb_mf_cas.mo_coeff, root=0)
+
+    # returns a mf object for the small CAS space, and natural orbital coefficients
+    # that construct the CAS orbitals
+    return emb_mf_cas, no_coeff
+
 
 ############################################################
 #           read contact's mean-field data
@@ -87,23 +247,26 @@ fh = h5py.File(data_fname, 'r')
 # imp atom block only
 hcore_lo_imp = np.asarray(fh['hcore_lo_imp'])
 JK_lo_ks_imp = np.asarray(fh['JK_lo_imp'])
+JK_lo_hf_imp = np.asarray(fh['JK_lo_hf_imp'])
 
 # entire center region, imp + some Cu atoms
 hcore_lo_contact = np.asarray(fh['hcore_lo'])
 JK_lo_ks_contact = np.asarray(fh['JK_lo'])
+JK_lo_hf_contact = np.asarray(fh['JK_lo_hf'])
 
 #------------ read density matrix ------------
 DM_lo_imp = np.asarray(fh['DM_lo_imp'])
 
 #------------ read ERI ------------
 eri_lo_imp = np.asarray(fh['eri_lo_imp'])
-
-# for mf embedding sanity check
-C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])[0,0]
-DM_lo_tot = np.asarray(fh['DM_lo_tot'])
-JK_ao = np.asarray(fh['JK_ao'])
-
 fh.close()
+
+
+
+
+
+
+
 
 #************ permute eri for unrestricted case ************
 # see Tianyu's run_dmft.py 
@@ -132,16 +295,20 @@ spin, nkpts = hcore_lo_contact.shape[0:2]
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
     print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
+    print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
     print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
+    print('JK_lo_hf_imp.shape = ', JK_lo_hf_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('eri_lo_imp.shape = ', eri_lo_imp.shape)
     print('')
 
     print('hcore_lo_contact.dtype = ', hcore_lo_contact.dtype)
     print('JK_lo_ks_contact.dtype = ', JK_lo_ks_contact.dtype)
+    print('JK_lo_hf_contact.dtype = ', JK_lo_hf_contact.dtype)
     print('hcore_lo_imp.dtype = ', hcore_lo_imp.dtype)
     print('JK_lo_ks_imp.dtype = ', JK_lo_ks_imp.dtype)
+    print('JK_lo_hf_imp.dtype = ', JK_lo_hf_imp.dtype)
     print('DM_lo_imp.dtype = ', DM_lo_imp.dtype)
     print('eri_lo_imp.dtype = ', eri_lo_imp.dtype)
     print('')
@@ -153,6 +320,13 @@ if rank == 0:
     print('finish reading contact mean field data\n')
 
 comm.Barrier()
+
+############################################################
+#           number of electrons on impurity
+############################################################
+# target number of electrons on the impurity for mu-optimization
+nelec_lo_imp = np.trace(DM_lo_imp[0].sum(axis=0)/nkpts)
+print('mf number of electrons on imp:', nelec_lo_imp)
 
 ############################################################
 #               read lead's mean-field data
@@ -171,7 +345,7 @@ num_layer = 8
 bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a) + '_n' + str(num_layer)
 
 bath_cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
-bath_cell = chkfile.load_cell(bath_cell_fname)
+bath_cell = pbcchkfile.load_cell(bath_cell_fname)
 nat_Cu_lead = len(bath_cell.atom)
 
 bath_gdf_fname = bath_dir + 'cderi_' + bath_cell_label + '.h5'
@@ -192,7 +366,7 @@ solver_label = 'newton'
 bath_mf_fname = bath_dir + bath_cell_label + '_' + bath_method_label + '_' + solver_label + '.chk'
 
 bath_mf.with_df = bath_gdf
-bath_mf.__dict__.update( chkfile.load(bath_mf_fname, 'scf') )
+bath_mf.__dict__.update( pbcchkfile.load(bath_mf_fname, 'scf') )
 
 ihomo = 29*nat_Cu_lead//2-1
 ilumo = 29*nat_Cu_lead//2
@@ -232,63 +406,28 @@ H01 = F_lo_lead[0, :nao_ppl, nao_ppl:2*nao_ppl]
 if rank == 0:
     print('finish reading lead mean field data\n')
 
+comm.Barrier()
+
+##################
+#plt.imshow(np.abs(F_lo_lead[0]))
+#plt.show()
+#exit()
+##################
 
 ############################################################
 #               impurity Hamiltonian
 ############################################################
 hcore_lo_imp = 1./nkpts * np.sum(hcore_lo_imp, axis=1)
-JK_lo_ks_imp = 1./nkpts * np.sum(JK_lo_ks_imp, axis=1)
+JK_lo_hf_imp = 1./nkpts * np.sum(JK_lo_hf_imp, axis=1)
 DM_lo_imp = 1./nkpts * np.sum(DM_lo_imp, axis=1)
 
-#------------ build contact object ------------
-print('ready to build mf contact')
-cell = chkfile.load_cell(cell_fname)
- 
-gdf = pbcdf.GDF(cell)
-gdf._cderi = gdf_fname
+JK_00 = scf_mu._get_veff(DM_lo_imp, eri_lo_imp)
 
-mf_contact = pbcscf.RKS(cell).density_fit()
-mf_contact.xc = 'pbe0'
-mf_contact.with_df = gdf
-print('mf contact built!')
-
-#------------ compute/load JK_00 ------------
-# JK_00 stands for intra-(imp val+virt) two-body mean field potential 
-# for DFT it is computed by taking the difference between veff with/without imp val+virt DM
-JK_00_fname = 'JK_00_' + imp_atom + '.h5'
-if os.path.isfile(JK_00_fname):
-    fh = h5py.File(JK_00_fname, 'r')
-    JK_00 = np.asarray(fh['JK_00'])
-    veff_ref = np.asarray(fh['veff_ref'])
-    fh.close()
-else:
-    # total DM in LO basis, imp val+virt block removed
-    DM_lo_tmp = np.copy(DM_lo_tot)
-    DM_lo_tmp[9:31,9:31] = 0
-    
-    # transform to AO basis
-    DM_ao_tmp = C_ao_lo_tot @ DM_lo_tmp @ C_ao_lo_tot.T.conj()
-    JK_ao_tmp = np.asarray(mf_contact.get_veff(dm=DM_ao_tmp))
-    
-    # transform the potential to LO basis
-    JK_lo_tmp = C_ao_lo_tot.T.conj() @ JK_ao_tmp @ C_ao_lo_tot
-
-    # take the different for the imp val+virt block
-    JK_lo_tmp = JK_lo_tmp[np.newaxis,...]
-    JK_00 = JK_lo_ks_imp - JK_lo_tmp[:,9:31,9:31]
-
-    veff_ref = np.copy(JK_lo_tmp[0,9:31,9:31])
-
-    fh = h5py.File(JK_00_fname, 'w')
-    fh['veff_ref'] = veff_ref
-    fh['JK_00'] = JK_00
-    fh.close()
-
-Hemb_imp = hcore_lo_imp + JK_lo_ks_imp - JK_00
+Hemb_imp = hcore_lo_imp + JK_lo_hf_imp - JK_00
 
 if rank == 0:
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
-    print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
+    print('JK_lo_hf_imp.shape = ', JK_lo_hf_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('JK_00.shape = ', JK_00.shape)
     print('Hemb_imp.shape = ', Hemb_imp.shape)
@@ -304,20 +443,18 @@ if rank == 0:
 comm.Barrier()
 
 ############################################################
-#           contact's Green's function 
+#               contact's Green's function
 ############################################################
 hcore_lo_contact = 1./nkpts * np.sum(hcore_lo_contact, axis=1)
-JK_lo_ks_contact = 1./nkpts * np.sum(JK_lo_ks_contact, axis=1)
+JK_lo_hf_contact = 1./nkpts * np.sum(JK_lo_hf_contact, axis=1)
 
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
-    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
+    print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('')
 
 # return a 3-d array of size (spin, nao_contact, nao_contact)
 def contact_Greens_function(z):
-
-    # surface Green's function
     g00 = Umerski1997(z, H00, H01)
 
     V_L = np.zeros((nao_contact, nao_ppl), dtype=complex)
@@ -332,11 +469,8 @@ def contact_Greens_function(z):
     # contact block of the Green's function
     G_C = np.zeros((spin, nao_contact, nao_contact), dtype=complex)
     for s in range(spin):
-        if with_lead:
-            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] \
-                    - Sigma_L - Sigma_R )
-        else:
-            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] )
+        G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_hf_contact[s] \
+                - Sigma_L - Sigma_R )
     return G_C
 
 comm.Barrier()
@@ -363,241 +497,83 @@ def Gamma(e):
     return -1./np.pi*Sigma_imp.imag
 
 
-############################################################
-#               bath discretization
-############################################################
-#------------ log discretization ------------
-wlg = -0.4
-whg = 0.6
+
+########################################
+#   parameters for bath discretization
+########################################
 nbe = 50 # total number of bath energies
 nbath_per_ene = 3
-
-grid_type = 'custom1'
-log_disc_base = 2.0
-wlog = 0.01
-
-grid = gen_grid(nbe, wlg, whg, disc_center, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
-
-print('grid points:', grid)
-print('number of grids:', len(grid))
-
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
-
-hemb = np.zeros((spin, nemb, nemb))
-
-if rank == 0:
-    print('hemb.shape = ', hemb.shape)
-    print('bath discretization starts')
-
-# one body part
-for s in range(spin):
-    Gamma_s = lambda e: Gamma(e)[s]
-    e,v = direct_disc_hyb(Gamma_s, grid, nint=30, nbath_per_ene=nbath_per_ene)
+wlg = -0.6
+whg = 1.2
+log_disc_base = 2.0
+grid_type = 'custom1'
+wlog=0.01
     
-    hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
+def gen_hemb(mu):
+    grid = gen_grid(nbe, wlg, whg, mu, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
+    hemb = np.zeros((spin, nemb, nemb))
+    
+    # one body part
+    for s in range(spin):
+        Gamma_s = lambda e: Gamma(e)[s]
+        e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
+        
+        hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
 
-if rank == 0:
-    print('bath discretization finished')
-    print('bath energies = ', e)
+    if rank == 0:
+        print('bath energies = ', e)
+
+    return hemb
+
 
 ############################################################
-#               user-defined mf object
+#           electron repulsion integral
+#               needed by cisd!
 ############################################################
-class RHF2(scf.hf.RHF):
-
-    __doc__ = scf.hf.RHF.__doc__
-
-    def __init__(self, mol, mu):
-
-        scf.hf.SCF.__init__(self, mol)
-
-        self._mf = mf_contact
-        self._veff_ref = veff_ref
-        self._C_ao_lo_tot = C_ao_lo_tot
-        self._DM_lo_tot = DM_lo_tot
-        self.mu = mu
-
-
-    def get_occ(self, mo_energy=None, mo_coeff=None):
-        mo_occ = np.zeros_like(mo_energy)
-        mo_occ[mo_energy<=self.mu] = 2.0
-        return mo_occ
-
-
-    def get_veff(self, mol, dm, dm_last=0, vhf_last=0):
-        # imp def2-svp: core-9 val-6 virt-16
-
-        # given an embedding dm, extract the imp block
-        # imp val+virt has 22 orbitals
-        dm_imp = dm[:22, :22]
-
-        # DM in LO basis, all orbitals (core+val+virt)
-        dm_tot_lo = np.copy(self._DM_lo_tot)
-
-        # C is the AO-to-LO transformation matrix (all LO, including core)
-        C = np.copy(self._C_ao_lo_tot)
-
-        # replace the imp val+virt block
-        dm_tot_lo[9:31,9:31] = dm_imp
-
-        # P^{AO} = C P^{LO} \dg{C}
-
-        # transform to AO basis
-        dm_tot_ao = C @ dm_tot_lo @ C.T.conj()
-
-        ## self._kmf is a pbc scf, need an extra k axis
-        #dm_tot_ao = dm_tot_ao[np.newaxis,...]
-
-        # compute veff
-        veff_ao = self._mf.get_veff(dm=dm_tot_ao)
-
-        # veff_ao is a tagged array, extract its content
-        veff_ao = np.asarray(veff_ao)
-
-        # transform to LO
-        veff_lo = C.T.conj() @ veff_ao @ C
-
-        veff_diff = veff_lo[9:31,9:31] - self._veff_ref
-
-        # veff in the embedding model
-        # only non-zero in the imp block
-        veff = np.zeros_like(dm)
-
-        # extract imp val+virt
-        veff[:22,:22] = veff_diff
-
-        #return veff, veff_lo
-        return veff
+# only non-zero on the impurity
+eri_imp = np.zeros([spin*(spin+1)//2, nemb, nemb, nemb, nemb])
+eri_imp[:,:nao_imp,:nao_imp,:nao_imp,:nao_imp] = eri_lo_imp
 
 
 ############################################################
 #               build embedding model
 ############################################################
+
+print('mu = ', mu)
+
+hemb = gen_hemb(mu)
+
 mol = gto.M()
 mol.verbose = 4
 mol.incore_anyway = True
 mol.build()
 
-mf = RHF2(mol, mu)
+
+mf = scf_mu.RHF(mol, mu)
 mf.get_hcore = lambda *args: hemb[0]
-mf.get_ovlp = lambda *args: np.eye(nemb)
+#mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
+mf._eri = eri_imp[0]
 mf.mo_energy = np.zeros([nemb])
-mf.mo_occ = np.zeros([nemb])
+
+mf.get_ovlp = lambda *args: np.eye(nemb)
+mf.max_cycle = 150
+mf.conv_tol = 1e-10
+mf.diis_space = 15
 
 # dm initial guess
 iocc = np.array(hemb[0].diagonal() < mu, dtype=float)
 dm0 = np.diag(iocc) * 2.0
 dm0[:nao_imp,:nao_imp] = DM_lo_imp.copy()
 
-#------------ sanity check ------------
-# mf.get_veff returns intra-(imp val+virt) veff
-# Cu-to-imp veff is incorporated in mf.hcore (which is Himp_imp) and is stored as mf._veff_ref
-veff_test = mf.get_veff(mol=mol,dm=dm0)
-fock_imp_test = veff_test[:22,:22] + mf.get_hcore()[:22,:22]
-fock_imp_ref = hcore_lo_imp + JK_lo_ks_imp
-fock_imp_ref = fock_imp_ref[0]
-print('sanity check: fock_imp diff = ', np.linalg.norm(fock_imp_ref-fock_imp_test))
-
-JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao[0]), C_ao_lo_tot)
-print('sanity check: JK_lo diff = ', np.linalg.norm(veff_test[0:22,0:22]+mf._veff_ref-JK_lo_tot[9:31,9:31]))
-#------------ sanity check end ------------
-
 mf.kernel(dm0)
-rdm1 = mf.make_rdm1()
-fock = hemb[0] + mf.get_veff(mol=mol, dm=rdm1)
-
-print('trace(rdm1[imp val+virt])', np.trace(rdm1[0:nao_imp,0:nao_imp]))
-print('trace(rdm1[imp val])', np.trace(rdm1[0:nval_imp,0:nval_imp]))
-print('rdm1 diff = ', np.linalg.norm(rdm1[0:nao_imp, 0:nao_imp]-DM_lo_imp[0]))
 
 
 
-
-## Fock iteration for embedding Hamiltonian
-## for commutator-DIIS
-#smearing_sigma = 0
-#def fock2fockcomm(fock_in):
-#    e,v = eiggen(fock_in, np.eye(nemb))
-#    
-#    # use fermi broadening to assist convergence
-#    #v_occ = v[:, e<mu]
-#    #dm = 2. * v_occ @ v_occ.T
-#
-#
-#    if abs(smearing_sigma) > 1e-10:
-#        occ = 2./( 1. + np.exp((e-mu)/smearing_sigma) )
-#    else:
-#        occ = np.zeros_like(e)
-#        occ[e<=mu] = 2.0
-#
-#    dm = (v*occ) @ v.T
-#
-#    fock_out = mf.get_hcore() + mf.get_veff(mol=mol, dm=dm)
-#    comm = fock_out @ dm - dm @ fock_out
-#    return fock_out, comm
-#
-#
-#fock_0 = veff_test + mf.get_hcore()
-#fock, flag = diis(fock2fockcomm, fock_0, max_iter=300)
-#
-#if flag == 0:
-#    print('fock.shape = ', fock.shape)
-#else:
-#    exit()
-#
-#e,v = eiggen(fock, np.eye(nemb))
-#
-#if abs(smearing_sigma) > 1e-10:
-#    occ = 2./( 1. + np.exp((e-mu)/smearing_sigma) )
-#else:
-#    occ = np.zeros_like(e)
-#    occ[e<=mu] = 2.0
-#rdm1 = (v*occ) @ v.T
-
-
-#############################################################
-
-
-#------------ compute & plot imp LDoS ------------
-
-if spin == 1:
-    fock = fock[np.newaxis,...]
-
-wld = -0.4
-whd = 0.8
-nwd = 400
-eta = 0.03
-freqs = np.linspace(wld,whd,nwd)
-
-# imp ldos from embedding model
-A = np.zeros((spin,nwd,nval_imp))
-for s in range(spin):
-    for iw in range(nwd):
-        z = freqs[iw] + 1j*eta
-
-        gf_mo = np.diag(1./(z-mf.mo_energy))
-        gf_ao = mf.mo_coeff @ gf_mo @ mf.mo_coeff.T
-
-        A[s,iw,:] = -1./np.pi*np.diag(gf_ao[0:nval_imp,0:nval_imp]).imag
-
-# mean-field LDoS from contact Green's function
-ldos_ref = np.zeros((spin,nwd,nval_imp))
-for iw in range(nwd):
-    z = freqs[iw] + 1j*eta
-    GC = contact_Greens_function(z)
-    for s in range(spin):
-        ldos_ref[s,iw,:] = -1./np.pi*np.diag(GC[s,:nval_imp, :nval_imp]).imag
-
-fh = h5py.File('imp_rks_ldos_nbe%i_nbpe%i_mu%5.3f_gate%5.3f.h5'%(nbe, nbath_per_ene, mu, gate), 'w')
-fh['freqs'] = freqs
-fh['A'] = A[0,:,:]
-fh['ldos_ref'] = ldos_ref[0,:,:]
-fh['nbe'] = nbe
-fh['nbath_per_ene'] = nbath_per_ene
-fh.close()
-
-
-
-
+emb_mf_cas, no_coeff = gen_cas_cisd(mf)
+exit()
+############################################################
+#                   end of main
+############################################################
 

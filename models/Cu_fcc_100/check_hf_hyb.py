@@ -8,49 +8,28 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 
 from pyscf import gto, ao2mo, cc, scf, dft
+from pyscf.lib import chkfile
 
 from pyscf.pbc import scf as pbcscf
 from pyscf.pbc import df as pbcdf
-from pyscf.pbc.lib import chkfile
+from pyscf.pbc.lib import chkfile as pbcchkfile
 
-from utils.diis import diis
 from utils.surface_green import *
 from utils.bath_disc import *
-from utils.emb_helper import *
+from utils.broydenroot import *
 
 from pyscf.scf.hf import eig as eiggen
 
-#   Fe
-#   gate         -0.1    -0.05     0       0.05     0.1
-# optimized mu   0.1422  0.1536  0.1544   0.1575   0.1601
-
-#   Co
-#   gate         -0.1    -0.05     0       0.05     0.1
-# optimized mu   0.1847  0.1829  0.1829   0.1829   0.1859
-
-#   Ni
-#   gate         -0.1    -0.05     0       0.05     0.1
-# optimized mu   0.0941  0.0842  0.0652   0.0638   0.0655
-
-############################################################
-# this script computes the following mean-field LDoS:
-# 1. full Kohn-Sham without surface Green's function
-# 2. full Kohn-Sham with surface Green's function
-# 3. embedding model (KS-converged, HF+DMFT embedding) solved by HF
-############################################################
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
 
 imp_atom = 'Co'
 
-############################################################
-#                   gate voltage
-############################################################
 gate = 0.000
 gate_label = 'gate%5.3f'%(gate)
 
-mu0 = 0.1829
+mu = 0.04
 ############################################################
 #           read contact's mean-field data
 ############################################################
@@ -79,8 +58,7 @@ cell_fname = contact_dir + '/cell_' + cell_label + '.chk'
 
 gdf_fname = contact_dir + '/cderi_' + cell_label + '.h5'
 
-xcfun = 'pbe0'
-method_label = 'rks_' + xcfun
+method_label = 'rhf'
 
 data_fname = contact_dir + '/data_contact_' + cell_label + '_' \
         + method_label + '_' + gate_label + '.h5'
@@ -90,25 +68,17 @@ fh = h5py.File(data_fname, 'r')
 
 # imp atom block only
 hcore_lo_imp = np.asarray(fh['hcore_lo_imp'])
-JK_lo_ks_imp = np.asarray(fh['JK_lo_imp'])
-JK_lo_hf_imp = np.asarray(fh['JK_lo_hf_imp'])
+JK_lo_hf_imp = np.asarray(fh['JK_lo_imp'])
 
 # entire center region, imp + some Cu atoms
 hcore_lo_contact = np.asarray(fh['hcore_lo'])
-JK_lo_ks_contact = np.asarray(fh['JK_lo'])
-JK_lo_hf_contact = np.asarray(fh['JK_lo_hf'])
+JK_lo_hf_contact = np.asarray(fh['JK_lo'])
 
 #------------ read density matrix ------------
 DM_lo_imp = np.asarray(fh['DM_lo_imp'])
 
 #------------ read ERI ------------
 eri_lo_imp = np.asarray(fh['eri_lo_imp'])
-
-# for mf embedding sanity check
-C_ao_lo_tot = np.asarray(fh['C_ao_lo_tot'])[0,0]
-DM_lo_tot = np.asarray(fh['DM_lo_tot'])
-JK_ao = np.asarray(fh['JK_ao'])
-
 fh.close()
 
 #************ permute eri for unrestricted case ************
@@ -137,17 +107,13 @@ spin, nkpts = hcore_lo_contact.shape[0:2]
 # hcore is a 4-d array with shape (spin, nkpts, nao, nao)
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
-    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
-    print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('eri_lo_imp.shape = ', eri_lo_imp.shape)
     print('')
 
     print('hcore_lo_contact.dtype = ', hcore_lo_contact.dtype)
-    print('JK_lo_ks_contact.dtype = ', JK_lo_ks_contact.dtype)
     print('hcore_lo_imp.dtype = ', hcore_lo_imp.dtype)
-    print('JK_lo_ks_imp.dtype = ', JK_lo_ks_imp.dtype)
     print('DM_lo_imp.dtype = ', DM_lo_imp.dtype)
     print('eri_lo_imp.dtype = ', eri_lo_imp.dtype)
     print('')
@@ -159,6 +125,13 @@ if rank == 0:
     print('finish reading contact mean field data\n')
 
 comm.Barrier()
+
+############################################################
+#           number of electrons on impurity
+############################################################
+# target number of electrons on the impurity for mu-optimization
+nelec_lo_imp = np.trace(DM_lo_imp[0].sum(axis=0)/nkpts)
+print('mf number of electrons on imp:', nelec_lo_imp)
 
 ############################################################
 #               read lead's mean-field data
@@ -177,7 +150,7 @@ num_layer = 8
 bath_cell_label = 'Cu_' + Cu_basis + '_a' + str(a) + '_n' + str(num_layer)
 
 bath_cell_fname = bath_dir + 'cell_' + bath_cell_label + '.chk'
-bath_cell = chkfile.load_cell(bath_cell_fname)
+bath_cell = pbcchkfile.load_cell(bath_cell_fname)
 nat_Cu_lead = len(bath_cell.atom)
 
 bath_gdf_fname = bath_dir + 'cderi_' + bath_cell_label + '.h5'
@@ -198,7 +171,7 @@ solver_label = 'newton'
 bath_mf_fname = bath_dir + bath_cell_label + '_' + bath_method_label + '_' + solver_label + '.chk'
 
 bath_mf.with_df = bath_gdf
-bath_mf.__dict__.update( chkfile.load(bath_mf_fname, 'scf') )
+bath_mf.__dict__.update( pbcchkfile.load(bath_mf_fname, 'scf') )
 
 ihomo = 29*nat_Cu_lead//2-1
 ilumo = 29*nat_Cu_lead//2
@@ -240,24 +213,20 @@ if rank == 0:
 
 comm.Barrier()
 
-
 ############################################################
 #               impurity Hamiltonian
 ############################################################
 hcore_lo_imp = 1./nkpts * np.sum(hcore_lo_imp, axis=1)
-JK_lo_ks_imp = 1./nkpts * np.sum(JK_lo_ks_imp, axis=1)
 JK_lo_hf_imp = 1./nkpts * np.sum(JK_lo_hf_imp, axis=1)
 DM_lo_imp = 1./nkpts * np.sum(DM_lo_imp, axis=1)
 
-#------------ HF+DMFT embedding ------------
-# JK_00 stands for intra-(imp val+virt) two-body mean field potential 
 JK_00 = scf_mu._get_veff(DM_lo_imp, eri_lo_imp)
 
 Hemb_imp = hcore_lo_imp + JK_lo_hf_imp - JK_00
 
 if rank == 0:
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
-    print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
+    print('JK_lo_hf_imp.shape = ', JK_lo_hf_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('JK_00.shape = ', JK_00.shape)
     print('Hemb_imp.shape = ', Hemb_imp.shape)
@@ -273,20 +242,18 @@ if rank == 0:
 comm.Barrier()
 
 ############################################################
-#           contact's Green's function 
+#               contact's Green's function
 ############################################################
 hcore_lo_contact = 1./nkpts * np.sum(hcore_lo_contact, axis=1)
-JK_lo_ks_contact = 1./nkpts * np.sum(JK_lo_ks_contact, axis=1)
 JK_lo_hf_contact = 1./nkpts * np.sum(JK_lo_hf_contact, axis=1)
 
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
-    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
     print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('')
 
 # return a 3-d array of size (spin, nao_contact, nao_contact)
-def contact_Greens_function_hf(z):
+def contact_Greens_function(z):
     g00 = Umerski1997(z, H00, H01)
 
     V_L = np.zeros((nao_contact, nao_ppl), dtype=complex)
@@ -297,30 +264,14 @@ def contact_Greens_function_hf(z):
 
     Sigma_L = V_L @ g00 @ V_L.T.conj()
     Sigma_R = V_R @ g00 @ V_R.T.conj()
+
+    Sigma_L.fill(0.0)
+    Sigma_R.fill(0.0)
 
     # contact block of the Green's function
     G_C = np.zeros((spin, nao_contact, nao_contact), dtype=complex)
     for s in range(spin):
         G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_hf_contact[s] \
-                - Sigma_L - Sigma_R )
-    return G_C
-
-def contact_Greens_function_ks(z):
-    g00 = Umerski1997(z, H00, H01)
-
-    V_L = np.zeros((nao_contact, nao_ppl), dtype=complex)
-    V_R = np.zeros((nao_contact, nao_ppl), dtype=complex)
-
-    V_L[nao_imp:nao_imp+nao_ppl,:] = H01.T.conj()
-    V_R[-nao_ppl:,:] = H01
-
-    Sigma_L = V_L @ g00 @ V_L.T.conj()
-    Sigma_R = V_R @ g00 @ V_R.T.conj()
-
-    # contact block of the Green's function
-    G_C = np.zeros((spin, nao_contact, nao_contact), dtype=complex)
-    for s in range(spin):
-        G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] \
                 - Sigma_L - Sigma_R )
     return G_C
 
@@ -333,12 +284,12 @@ comm.Barrier()
 n_hyb = nao_imp
 
 # broadening for computing hybridization Gamma from self energy
-delta= 0.002
+delta= 0.005
 # -1/pi*imag(Sigma(e+i*delta))
 # (spin, n_hyb, n_hyb)
 def Gamma(e):
     z = e + 1j*delta
-    G_C = contact_Greens_function_hf(z)
+    G_C = contact_Greens_function(z)
     
     Sigma_imp = np.zeros((spin, n_hyb, n_hyb),dtype=complex)
     for s in range(spin):
@@ -347,135 +298,84 @@ def Gamma(e):
 
     return -1./np.pi*Sigma_imp.imag
 
+Gamma_s = lambda e: Gamma(e)[0]
 
-########################################
-#   parameters for bath discretization
-########################################
-nbe = 50 # total number of bath energies
-nbath_per_ene = 3
-nbath = nbe * nbath_per_ene
-nemb = nbath + nao_imp
-wlg = -0.4
-whg = 0.6
+############################################################
+#               exact Gamma
+############################################################
+wl = -1.6
+wh = 3.0
+nw = 500
+plot_grid = np.linspace(wl, wh, nw)
+hyb = np.zeros((nw, n_hyb, n_hyb))
+for iw in range(nw):
+    hyb[iw,:,:] = Gamma_s(plot_grid[iw])
+
+#for i in [1,4]:
+##for i in range(6):
+#    plt.plot(plot_grid, hyb[:,i,i], linestyle='-', label='exact'+str(i), color='C'+str(i))
+#
+#plt.xlim([wl,wh])
+##plt.ylim([-0.01,0.3])
+#
+#fig = plt.gcf()
+#fig.set_size_inches(6,4)
+#
+#plt.legend()
+#plt.show()
+#
+#exit()
+
+############################################################
+#       rebuild Gamma by bath discretization
+############################################################
+#------------ bath discretization ------------
+# evenly spaced grid
+wlg = -1.0
+whg = 2.0
+nbe = 100 # total number of bath energies
+nbath_per_ene = 9
+
+grid_type = 'linear'
 log_disc_base = 2.0
-grid_type = 'custom1'
-wlog=0.01
-    
-def gen_hemb(mu):
-    grid = gen_grid(nbe, wlg, whg, mu, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
-    hemb = np.zeros((spin, nemb, nemb))
-    
-    # one body part
-    for s in range(spin):
-        Gamma_s = lambda e: Gamma(e)[s]
-        e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
-        
-        hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
+wlog = 0.01
 
-    if rank == 0:
-        print('bath energies = ', e)
+grid = gen_grid(nbe, wlg, whg, mu, grid_type, log_disc_base, wlog=wlog)
 
-    return hemb
+# only test one spin component
+e,v = direct_disc_hyb(Gamma_s, grid, nint=5, nbath_per_ene=nbath_per_ene)
+comm.Barrier()
+if rank == 0:
+    print('bath discretization finished')
+    print('e.shape = ', e.shape)
+    print('v.shape = ', v.shape)
+    print('bath energies = ', e)
+    print('')
 
+# rebuild Gamma
+#bdfun = lambda x,x0,b: 1.0/np.pi*b/((x-x0)**2+b**2)
+bdfun = lambda x,mu,sigma: 1.0/sigma/np.sqrt(2*np.pi)*np.exp(-0.5*((x-mu)/sigma)**2)
+eta=0.005
 
-############################################################
-#           electron repulsion integral
-############################################################
-# only non-zero on the impurity
-eri_imp = np.zeros([spin*(spin+1)//2, nemb, nemb, nemb, nemb])
-eri_imp[:,:nao_imp,:nao_imp,:nao_imp,:nao_imp] = eri_lo_imp
-
-
-############################################################
-#           embedding model DM initial guess
-############################################################
-dm0 = np.zeros((spin,nemb,nemb))
-dm0[:,:nao_imp,:nao_imp] = DM_lo_imp.copy()
-
-############################################################
-#               build embedding model
-############################################################
-def get_emb_mf(mu):
-    mol = gto.M()
-    mol.verbose = 4
-    mol.incore_anyway = True
-    mol.build()
-
-    hemb = gen_hemb(mu)
-
-    emb_mf = scf_mu.RHF(mol, mu)
-    emb_mf.get_hcore = lambda *args: hemb[0]
-    emb_mf._eri = ao2mo.restore(8, eri_imp[0], nemb)
-    emb_mf.mo_energy = np.zeros([nemb])
-    
-    emb_mf.get_ovlp = lambda *args: np.eye(nemb)
-    emb_mf.max_cycle = 150
-    emb_mf.conv_tol = 1e-10
-    emb_mf.diis_space = 15
-
-    if rank == 0:
-        emb_mf.kernel(dm0[0])
-
-    emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
-    emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
-    emb_mf.mo_occ = comm.bcast(emb_mf.mo_occ, root=0)
-
-    return emb_mf
-
-mu = mu0
-print('embedding model chemical potential mu = ', mu)
-emb_mf = get_emb_mf(mu)
-
-############################################################
-#       frequencies to compute spectra
-############################################################
-wl_freqs = -0.6
-wh_freqs = 1.2
-nw = 200
-freqs = np.linspace(wl_freqs, wh_freqs, nw)
-eta = 0.02
-eta_label = 'eta%5.3f'%(eta)
-
-############################################################
-#       mf-LDoS1: KS mean-field LDoS (from contact GF, with lead)
-############################################################
-ldos_ks = np.zeros((nao_imp, nw))
+Gamma_rebuilt = np.zeros((nw,n_hyb,n_hyb))
 for iw in range(nw):
-    z = freqs[iw] + 1j*eta
-    GC = contact_Greens_function_ks(z)
-    ldos_ks[:,iw] = -1./np.pi*GC[0,:nao_imp, :nao_imp].diagonal().imag
-print('ldos1 done')
+    for ib in range(len(e)):
+        for ie in range(nbath_per_ene):
+            Gamma_rebuilt[iw,:,:] += np.outer(v[ib,:,ie],v[ib,:,ie].conj()) * bdfun(plot_grid[iw],e[ib],eta)
 
-############################################################
-#       mf-LDoS2: HF mean-field LDoS (from contact GF)
-############################################################
-ldos_hf = np.zeros((nao_imp, nw))
-for iw in range(nw):
-    z = freqs[iw] + 1j*eta
-    GC = contact_Greens_function_hf(z)
-    ldos_hf[:,iw] = -1./np.pi*GC[0,:nao_imp, :nao_imp].diagonal().imag
-print('ldos2 done')
-
-############################################################
-#       mf-LDoS3: embedding model HF-solved LDoS
-############################################################
-ldos_emb_hf = np.zeros((nao_imp, nw))
-for iw in range(nw):
-    z = freqs[iw] + 1j*eta
-    gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-    gf_ao = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-    ldos_emb_hf[:,iw] = -1./np.pi * gf_ao[:nao_imp, :nao_imp].diagonal().imag
-print('ldos3 done')
+if rank == 0:
+    for i in [1,2,3,4,5]:
+    #for i in range(nval_imp):
+        plt.plot(plot_grid, hyb[:,i,i], linestyle=':', label='exact'+str(i), color='C'+str(i))
+        plt.plot(plot_grid, Gamma_rebuilt[:,i,i], linestyle='-', label='rebuilt'+str(i), color='C'+str(i))
     
-
-fh = h5py.File('ldos_mf_' + imp_atom + '_' + gate_label + '_' + eta_label + '.h5', 'w')
-fh['freqs'] = freqs
-fh['ldos_ks'] = ldos_ks
-fh['ldos_hf'] = ldos_hf
-fh['ldos_emb_hf'] = ldos_emb_hf
-fh.close()
-
-
-
+    plt.xlim([wl,wh])
+    #plt.ylim([-0.01,0.2])
+    
+    fig = plt.gcf()
+    fig.set_size_inches(6,4)
+    
+    plt.legend()
+    plt.show()
 
 

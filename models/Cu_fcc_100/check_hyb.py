@@ -24,342 +24,18 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
 
-mode = 'MODE'
-
-imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
-
-# whether perform an optimization or just a one-shot calculation
-opt_mu = OPT_MU if mode == 'production' else False
+imp_atom = 'Co'
 
 # chemical potential (initial guess in optimization if opt_mu is True)
-mu0 = CHEM_POT if mode == 'production' else 0.05
+mu = 0.1829
 
-# DMRG scratch & save folder
-scratch = 'SCRATCH'
-save_dir = 'SAVEDIR'
-os.environ['TMPDIR'] = scratch
-
-# number of active space occ/vir orbitals
-nocc_act = NOCC_ACT if mode == 'production' else 6
-nvir_act = NVIR_ACT if mode == 'production' else 9
-n_no = nocc_act + nvir_act
-
-
-######################################
-#       DMRG parameters
-######################################
-# NOTE scratch conflict for different job!
-# NOTE verbose=3 good enough
-# NOTE extra_freqs & extra_delta are set below
-#extra_freqs = None
-#extra_delta = None
-n_threads = NUM_THREADS if mode == 'production' else 8
-reorder_method='gaopt'
-
-# bond dimension: make DW ~ 1e-5/e-6 or smaller
-# 2000-5000 for gs
-gs_n_steps = 20
-gs_bond_dims = [400] * 5 + [800] * 5 + [1500] * 5 + [2000] * 5
-gs_tol = 1E-8
-gs_noises = [1E-3] * 5 + [1E-4] * 3 + [1e-7] * 2 + [0]
-
-# gf_bond_dims 1k~1.5k
-gf_n_steps = 8
-gf_bond_dims = [500] * 2 + [1000] * 4
-gf_tol = 1E-4
-gf_noises = [1E-4] * 2 + [1E-5] * 2 + [1E-7] * 2 + [0]
-
-gmres_tol = 1E-7
-
-cps_bond_dims = [2000]
-#cps_noises = [0]
-#cps_tol = 1E-10
-#cps_n_steps=20
-n_off_diag_cg = -2
-
-# correlation method within DMRG (like CAS, but not recommended)
-dyn_corr_method = None
-ncore_dmrg = 0
-nvirt_dmrg = 0
-
-diag_only= False
-
-
-############################################################
-#           an unknown auxiliary function
-############################################################
-def scdm(coeff, overlap):
-    from pyscf import lo
-    aux = lo.orth.lowdin(overlap)
-    no = coeff.shape[1]
-    ova = coeff.T @ overlap @ aux
-    piv = scipy.linalg.qr(ova, pivoting=True)[2]
-    bc = ova[:, piv[:no]]
-    ova = np.dot(bc.T, bc)
-    s12inv = lo.orth.lowdin(ova)
-    return coeff @ bc @ s12inv
-
-############################################################
-#           CAS from CISD natural orbital
-############################################################
-def gen_cas(emb_mf):
-
-    from pyscf import ci
-    
-    emb_cisd = ci.CISD(emb_mf)
-    emb_cisd.max_cycle = 1000
-    emb_cisd.max_space = 20
-    #emb_cisd.max_memory = 100000
-    emb_cisd.conv_tol = 1e-10
-    emb_cisd.verbose = 4
-    
-    emb_cisd_fname = 'emb_cisd_' + imp_atom + '.chk'
-    if rank == 0:
-        '''
-        if os.path.isfile(emb_cisd_fname):
-            print('load CISD data from', emb_cisd_fname)
-            emb_cisd.__dict__.update( chkfile.load(emb_cisd_fname, 'cisd') )
-        else:
-            emb_cisd.chkfile = emb_cisd_fname
-            print('CISD starts')
-            emb_cisd.kernel()
-            emb_cisd.dump_chk()
-        '''
-        # always run CISD from scratch
-        print('CISD starts')
-        print('CISD max_memory = ', emb_cisd.max_memory)
-        emb_cisd.kernel()
-    
-        dm_ci_mo = emb_cisd.make_rdm1()
-        
-        nmo = emb_cisd.nmo
-        nocc = emb_cisd.nocc # number of occupied MO
-        print('nocc = ', nocc)
-        print('nmo = ', nmo)
-    
-        print('dm_ci_mo.shape = ', dm_ci_mo.shape)
-    
-        # find natural orbital coefficients below
-    
-        # dm_ci_mo virtual block
-        no_occ_v, no_coeff_v = np.linalg.eigh(dm_ci_mo[nocc:,nocc:])
-        no_occ_v = np.flip(no_occ_v) # sort eigenvalues from large to small
-        no_coeff_v = np.flip(no_coeff_v, axis=1)
-        print('vir NO occupancy:', no_occ_v)
-    
-        # occupied block
-        no_occ_o, no_coeff_o = np.linalg.eigh(dm_ci_mo[:nocc,:nocc])
-        no_occ_o = np.flip(no_occ_o)
-        no_coeff_o = np.flip(no_coeff_o, axis=1)
-        print('occ NO occupancy:', no_occ_o)
-    
-        # use natural orbitals closest to the Fermi level
-        # these indices are within their own block (say, no_idx_v starts from 0)
-        no_idx_v = range(0, nvir_act)
-        no_idx_o = range(nocc-nocc_act, nocc)
-        
-        print('no_idx_v = ', no_idx_v)
-        print('no_idx_o = ', no_idx_o)
-    
-        # semi-canonicalization
-        # rotate occ/vir NOs so that they diagonalize the Fock matrix within their subspace
-        fvv = np.diag(emb_mf.mo_energy[nocc:])
-        fvv_no = no_coeff_v.T @ fvv @ no_coeff_v
-        _, v_canon_v = np.linalg.eigh(fvv_no[:nvir_act,:nvir_act])
-        
-        foo = np.diag(emb_mf.mo_energy[:nocc])
-        foo_no = no_coeff_o.T @ foo @ no_coeff_o
-        _, v_canon_o = np.linalg.eigh(foo_no[-nocc_act:,-nocc_act:])
-        
-        # at this stage, no_coeff is bare MO-to-NO coefficient (before semi-canonicalization)
-        no_coeff_v = emb_mf.mo_coeff[:,nocc:] @ no_coeff_v[:,:nvir_act] @ v_canon_v
-        no_coeff_o = emb_mf.mo_coeff[:,:nocc] @ no_coeff_o[:,-nocc_act:] @ v_canon_o
-        # now no_coeff is AO-to-NO coefficient (with semi-canonicalization)
-        
-        ne_sum = np.sum(no_occ_o[no_idx_o]) + np.sum(no_occ_v[no_idx_v])
-        nelectron = int(round(ne_sum))
-        
-        print('number of electrons in NO: ', ne_sum)
-        print('number of electrons: ', nelectron)
-        print('number of NOs: ', n_no)
-    
-    
-        # NOTE still do not understand scdm, but 'local' might be important!
-        no_coeff_o = scdm(no_coeff_o, np.eye(no_coeff_o.shape[0]))
-        no_coeff_v = scdm(no_coeff_v, np.eye(no_coeff_v.shape[0]))
-        no_coeff = np.concatenate((no_coeff_o, no_coeff_v), axis=1)
-    
-        print('natural orbital coefficients computed!')
-    
-    # final natural orbital coefficients for CAS
-    no_coeff = comm.bcast(no_coeff, root=0)
-
-    # new mf object for CAS
-    # first build CAS mol object
-    mol_cas = gto.M()
-    mol_cas.nelectron = nelectron
-    mol_cas.verbose = 4
-    mol_cas.symmetry = 'c1'
-    mol_cas.incore_anyway = True
-    emb_mf_cas = scf.RHF(mol_cas)
-    
-    # hcore & eri in NO basis
-    h1e = no_coeff.T @ (emb_mf.get_hcore() @ no_coeff)
-    g2e = ao2mo.restore(8, ao2mo.kernel(emb_mf._eri, no_coeff), n_no)
-    
-    
-    dm_hf = emb_mf.make_rdm1()
-    dm_cas_no = no_coeff.T @ dm_hf @ no_coeff
-    JK_cas_no = scf_mu._get_veff(dm_cas_no, g2e)[0]
-    JK_full_no = no_coeff.T @ emb_mf.get_veff() @ no_coeff
-    h1e = h1e + JK_full_no - JK_cas_no
-    h1e = 0.5 * (h1e + h1e.T)
-    
-    h1e = comm.bcast(h1e, root=0)
-    g2e = comm.bcast(g2e, root=0)
-    
-    # set up integrals for emb_mf_cas
-    emb_mf_cas.get_hcore = lambda *args: h1e
-    emb_mf_cas.get_ovlp = lambda *args: np.eye(n_no)
-    emb_mf_cas._eri = g2e
-    
-    if rank == 0:
-        print('scf within CAS')
-        emb_mf_cas.kernel(dm0=dm_cas_no)
-        print('scf within CAS finished!')
-    comm.Barrier()
-    
-    emb_mf_cas.mo_occ = comm.bcast(emb_mf_cas.mo_occ, root=0)
-    emb_mf_cas.mo_energy = comm.bcast(emb_mf_cas.mo_energy, root=0)
-    emb_mf_cas.mo_coeff = comm.bcast(emb_mf_cas.mo_coeff, root=0)
-
-    # returns a mf object for the small CAS space, and natural orbital coefficients
-    # that construct the CAS orbitals
-    return emb_mf_cas, no_coeff
-
-
-############################################################
-#               embedding rdm
-############################################################
-def get_rdm_emb(emb_mf):
-    from fcdmft.solver.gfdmrg import dmrg_mo_pdm
-
-    emb_mf_cas, no_coeff = gen_cas(emb_mf)
-
-    # low level dm in CAS space (natural orbital basis)
-    dm_low_cas = emb_mf_cas.make_rdm1()
-
-    # low level dm in AO space
-    dm_low = emb_mf.make_rdm1()
-
-    max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
-
-    if rank == 0:
-        if not os.path.isdir(scratch):
-            os.mkdir(scratch)
-        if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
-
-    # DM within CAS
-    dm_cas = dmrg_mo_pdm(emb_mf_cas, ao_orbs=range(0, n_no), mo_orbs=None, scratch=scratch, \
-            reorder_method=reorder_method, n_threads=n_threads, memory=max_memory, \
-            gs_bond_dims=gs_bond_dims, gs_n_steps=gs_n_steps, gs_tol=gs_tol, gs_noises=gs_noises, \
-            load_dir=None, save_dir=save_dir, verbose=3, mo_basis=False, ignore_ecore=False, \
-            mpi=True, dyn_corr_method=dyn_corr_method, ncore=ncore_dmrg, nvirt=nvirt_dmrg)
-
-    print('dm_cas.shape:', dm_cas.shape)
-    dm_cas = dm_cas[0] + dm_cas[1]
-
-    # difference between high and low level DM for CAS space
-    ddm = dm_cas - dm_low_cas
-    
-    # transform the difference to AO basis
-    ddm = no_coeff @ ddm @ no_coeff.T
-
-    # total embedding DM in AO space, equals to low-level dm plus high-level correction
-    rdm = dm_low + ddm
-
-    return rdm
-
-
-############################################################
-#           embedding model gf (AO basis)
-############################################################
-def get_gf_emb(emb_mf):
-    from fcdmft.solver.gfdmrg import dmrg_mo_gf
-
-    emb_mf_cas, no_coeff = gen_cas(emb_mf)
-
-    if rank == 0:
-        if not os.path.isdir(scratch):
-            os.mkdir(scratch)
-        if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
-
-    max_memory = int(emb_mf.max_memory * 1E6/nprocs) # in unit of bytes, per mpi proc
-
-    # gf_dmrg_cas has dimension (n_no, n_no, nwa) (frequency is its last dimension)
-    dm_dmrg_cas, gf_dmrg_cas = dmrg_mo_gf( \
-            emb_mf_cas, freqs=freqs, delta=delta, ao_orbs=range(0,n_no), mo_orbs=None, \
-            extra_freqs=extra_freqs, extra_delta=extra_delta, scratch=scratch, add_rem='+-', \
-            n_threads=n_threads, reorder_method=reorder_method, memory=max_memory, \
-            gs_bond_dims=gs_bond_dims, gf_bond_dims=gf_bond_dims, gf_n_steps=gf_n_steps, \
-            gs_n_steps=gs_n_steps, gs_tol=gs_tol, gf_noises=gf_noises, gf_tol=gf_tol, \
-            gs_noises=gs_noises, gmres_tol=gmres_tol, load_dir=None, save_dir=save_dir, \
-            cps_bond_dims=cps_bond_dims, cps_noises=[0], cps_tol=gs_tol, cps_n_steps=gs_n_steps, \
-            verbose=3, mo_basis=False, ignore_ecore=False, n_off_diag_cg=n_off_diag_cg, \
-            mpi=True, dyn_corr_method=dyn_corr_method, ncore=ncore_dmrg, nvirt=nvirt_dmrg, diag_only=diag_only)
-
-    print('gf_dmrg_cas.shape', gf_dmrg_cas.shape)
-    
-    fh = h5py.File('gf_dmrg_cas_' + imp_atom + '.h5', 'w')
-    fh['gf_dmrg_cas'] = gf_dmrg_cas
-    fh.close()
-    
-    # hf gf in CAS space (in NO basis)
-    gf_hf_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-    for iw in range(nwa):
-        z = all_freqs[iw] + 1j*extra_delta
-        gf_mo_cas = np.diag( 1. / (z - emb_mf_cas.mo_energy) )
-        gf_hf_cas[iw,:,:] = emb_mf_cas.mo_coeff @ gf_mo_cas @ emb_mf_cas.mo_coeff.T
-
-    # NO active space self energy
-    sigma_cas = np.zeros((nwa, n_no, n_no), dtype=complex)
-    for iw in range(nwa):
-        sigma_cas[iw,:,:] = np.linalg.inv(gf_hf_cas[iw,:,:]) - np.linalg.inv(gf_dmrg_cas[:,:,iw])
-    
-    # convert sigma_cas to self energy in AO space
-    sigma_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        sigma_ao[iw,:,:] = no_coeff @ (sigma_cas[iw,:,:] @ no_coeff.T)
-    
-    # hf gf in AO basis
-    gf_hf = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        z = all_freqs[iw] + 1j*extra_delta
-        gf_mo = np.diag( 1. / (z - emb_mf.mo_energy) )
-        gf_hf[iw,:,:] = emb_mf.mo_coeff @ gf_mo @ emb_mf.mo_coeff.T
-
-    # final GF in AO space (contains active space DMRG self energy)
-    gf_ao = np.zeros((nwa, nemb, nemb), dtype=complex)
-    for iw in range(nwa):
-        gf_ao[iw,:,:] = np.linalg.inv( np.linalg.inv(gf_hf[iw,:,:]) - sigma_ao[iw,:,:] )
-
-    return gf_ao
-
-
-############################################################
-#                   gate voltage
-############################################################
-gate = GATE if mode == 'production' else 0
+gate = 0.000
 gate_label = 'gate%5.3f'%(gate)
 
 ############################################################
 #           read contact's mean-field data
 ############################################################
-#contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
-prefix = 'PREFIX' if mode == 'production' else '/home/zuxin/'
-contact_dir = prefix + '/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
+contact_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/' + imp_atom + '/'
 if rank == 0:
     print('read contact\'s mean field data from', contact_dir)
 
@@ -474,8 +150,7 @@ print('mf number of electrons on imp:', nelec_lo_imp)
 #               read lead's mean-field data
 ############################################################
 
-#bath_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/Cu/'
-bath_dir = prefix + '/projects/transport/models/Cu_fcc_100/Cu/'
+bath_dir = '/home/zuxin/projects/transport/models/Cu_fcc_100/Cu/'
 
 if rank == 0:
     print('start reading lead mean field data from', bath_dir)
@@ -551,12 +226,6 @@ if rank == 0:
 
 comm.Barrier()
 
-##################
-#plt.imshow(np.abs(F_lo_lead[0]))
-#plt.show()
-#exit()
-##################
-
 ############################################################
 #               impurity Hamiltonian
 ############################################################
@@ -622,10 +291,10 @@ comm.Barrier()
 #               hybridization Gamma
 ############################################################
 # number of orbitals that couple to the bath, usually nval_imp or nao_imp
-n_hyb = nao_imp
+n_hyb = nval_imp
 
 # broadening for computing hybridization Gamma from self energy
-hyb_broadening= 0.02
+hyb_broadening= 0.03
 # -1/pi*imag(Sigma(e+i*delta))
 # (spin, n_hyb, n_hyb)
 def Gamma(e):
@@ -639,20 +308,52 @@ def Gamma(e):
 
     return -1./np.pi*Sigma_imp.imag
 
+Gamma_s = lambda e: Gamma(e)[0]
+
 ############################################################
-#       TEST: rebuild Gamma by bath discretization
+#               exact Gamma
+############################################################
+wl = -0.6
+wh = 1.2
+nw = 500
+plot_grid = np.linspace(wl, wh, nw)
+hyb = np.zeros((nw, n_hyb, n_hyb))
+for iw in range(nw):
+    hyb[iw,:,:] = Gamma_s(plot_grid[iw])
+
+#for i in [1,4]:
+##for i in range(6):
+#    plt.plot(plot_grid, hyb[:,i,i], linestyle='-', label='exact'+str(i), color='C'+str(i))
+#
+#plt.xlim([wl,wh])
+##plt.ylim([-0.01,0.3])
+#
+#fig = plt.gcf()
+#fig.set_size_inches(6,4)
+#
+#plt.legend()
+#plt.show()
+#
+#exit()
+
+############################################################
+#       rebuild Gamma by bath discretization
 ############################################################
 #------------ bath discretization ------------
 # evenly spaced grid
 wlg = -0.6
 whg = 1.2
-nbe = 40
-grid = np.linspace(wlg,whg,nbe)
-nbath_per_ene = 3
+nbe = 100 # total number of bath energies
+nbath_per_ene = 6
+
+grid_type = 'linear'
+log_disc_base = 2.0
+wlog = 0.01
+
+grid = gen_grid(nbe, wlg, whg, mu, grid_type, log_disc_base, wlog=wlog)
 
 # only test one spin component
-Gamma_s = lambda e: Gamma(e)[0]
-e,v = direct_disc_hyb(Gamma_s, grid, nint=3, nbath_per_ene=nbath_per_ene)
+e,v = direct_disc_hyb(Gamma_s, grid, nint=5, nbath_per_ene=nbath_per_ene)
 comm.Barrier()
 if rank == 0:
     print('bath discretization finished')
@@ -661,33 +362,24 @@ if rank == 0:
     print('bath energies = ', e)
     print('')
 
-#------------ compare exact & rebuilt Gamma ------------
-# exact hybridization Gamma
-wl = -0.6
-wh = 1.2
-nw = 1000
-freqs = np.linspace(wl, wh, nw)
-hyb = np.zeros((nw, n_hyb, n_hyb))
-for iw in range(nw):
-    hyb[iw,:,:] = Gamma_s(freqs[iw])
-
 # rebuild Gamma
-gauss = lambda x,mu,sigma: 1.0/sigma/np.sqrt(2*np.pi)*np.exp(-0.5*((x-mu)/sigma)**2)
-eta=0.02
+#bdfun = lambda x,x0,b: 1.0/np.pi*b/((x-x0)**2+b**2)
+sigma=0.02
+bdfun = lambda x,mu: 1.0/sigma/np.sqrt(2*np.pi)*np.exp(-0.5*((x-mu)/sigma)**2)
 
 Gamma_rebuilt = np.zeros((nw,n_hyb,n_hyb))
 for iw in range(nw):
-    for ib in range(len(e)):
-        for ie in range(nbath_per_ene):
-            Gamma_rebuilt[iw,:,:] += np.outer(v[ib,:,ie],v[ib,:,ie].conj()) * gauss(freqs[iw],e[ib],eta)
+    Gamma_rebuilt[iw,:,:] = get_Gamma(plot_grid[iw], e, v, bdfun)
+
 
 if rank == 0:
-    for i in range(nval_imp):
-        plt.plot(freqs, hyb[:,i,i], linestyle=':', label='exact'+str(i), color='C'+str(i))
-        plt.plot(freqs, Gamma_rebuilt[:,i,i], linestyle='-', label='rebuilt'+str(i), color='C'+str(i))
+    for i in [1,2,3]:
+    #for i in range(nval_imp):
+        plt.plot(plot_grid, hyb[:,i,i], linestyle=':', label='exact'+str(i), color='C'+str(i))
+        plt.plot(plot_grid, Gamma_rebuilt[:,i,i], linestyle='-', label='rebuilt'+str(i), color='C'+str(i))
     
     plt.xlim([wl,wh])
-    #plt.ylim([-0.01,0.3])
+    plt.ylim([-0.01,0.2])
     
     fig = plt.gcf()
     fig.set_size_inches(6,4)

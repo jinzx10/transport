@@ -1,33 +1,32 @@
 #!/bin/bash
 
-#SBATCH --partition=parallel
+#SBATCH --partition=smallmem
 #SBATCH --nodes=1
-#SBATCH --time=24:00:00
+#SBATCH --time=1:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=14
-#SBATCH --mem=50G
-#SBATCH --job-name=set_ham_contact
-##SBATCH --array=51-100%1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=10G
+#SBATCH --job-name=homo_lumo
+#SBATCH --array=0-200
 
 source $HOME/.bashrc
 conda activate
 
-export MKL_NUM_THREADS=14
-export OMP_NUM_THREADS=14
+export MKL_NUM_THREADS=8
+export OMP_NUM_THREADS=8
 
 dir=$HOME/projects/transport/models/Cu_fcc_100
 cd ${dir}
 
 #-----------------------------------
-imp_basis=`grep 'imp_basis = ' set_ham_contact.py | cut --delimiter="'" --fields=2`
-Cu_basis=`grep 'Cu_basis = ' set_ham_contact.py | cut --delimiter="'" --fields=2`
+imp_basis=`grep 'imp_basis = ' get_homo_lumo_energy.py | cut --delimiter="'" --fields=2`
+Cu_basis=`grep 'Cu_basis = ' get_homo_lumo_energy.py | cut --delimiter="'" --fields=2`
 
 #-----------------------------------
-imp_atom=Co
-use_dft=False
+imp_atom=Ni
+use_dft=True
 xcfun=pbe0
 do_restricted=True
-plot_orb=True
 
 if [[ ${imp_atom} == "Co" ]]; then
     nl=4
@@ -43,15 +42,8 @@ latconst=3.6
 cell=${imp_atom}_${imp_basis}_Cu_${Cu_basis}_nl${nl}_nr${nr}_l${left}_r${right}_a${latconst}
 
 #-----------------------------------
-#gate_list=(`seq 0 0.001 0.2`)
-#gate=${gate_list[${SLURM_ARRAY_TASK_ID}]}
-#
-#idx_last=`bc <<< "${SLURM_ARRAY_TASK_ID}-1"`
-#gate_last=${gate_list[${idx_last}]}
-#
-#echo 'idx_last = ' ${idx_last}
-#echo 'gate_last = ' ${gate_last}
-gate=0.000
+gate_list=(`seq -0.1 0.001 0.1`)
+gate=${gate_list[${SLURM_ARRAY_TASK_ID}]}
 
 #-----------------------------------
 if [[ ${do_restricted} == "True" ]]; then
@@ -67,15 +59,14 @@ else
 fi
 
 #-----------------------------------
-#mf_load_fname=${imp_atom}/${cell}_${method}_gate${gate_last}.chk
-mf_load_fname=${imp_atom}/${cell}_${method}_gate0.000.chk
+mf_load_fname=${imp_atom}/${cell}_${method}_gate${gate}.chk
 
 echo 'mf_load_fname' ${mf_load_fname}
 
 suffix=a${latconst}_nl${nl}_nr${nr}_l${left}_r${right}_${method}_gate${gate}_${imp_basis}_${Cu_basis}
 
-script=set_ham_contact_${imp_atom}_${suffix}.py
-output=set_ham_contact_${imp_atom}_${suffix}.out
+script=get_homo_lumo_energy_${imp_atom}_${suffix}.py
+output=get_homo_lumo_energy_${imp_atom}_${suffix}.out
 
 datadir=${dir}/${imp_atom}
 
@@ -92,9 +83,8 @@ sed -e"s/TEST/production/" \
     -e"s/RIGHT/${right}/" \
     -e"s/LATCONST/${latconst}/" \
     -e"s/GATE/${gate}/" \
-    -e"s/PLOT_ORB/${plot_orb}/" \
     -e"s:MF_LOAD_FNAME:${mf_load_fname}:" \
-    set_ham_contact.py > ${script}
+    get_homo_lumo_energy.py > ${script}
 
 echo 'imp atom = ' ${imp_atom}
 echo 'mf_load_fname = ' ${mf_load_fname}

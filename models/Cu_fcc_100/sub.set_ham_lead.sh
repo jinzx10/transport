@@ -17,7 +17,7 @@ export OMP_NUM_THREADS=14
 dir=$HOME/projects/transport/models/Cu_fcc_100
 
 #-----------------------------------
-use_dft=True
+use_dft=False
 xcfun=pbe0
 do_restricted=True
 
@@ -27,7 +27,7 @@ num_layer=8
 use_smearing=False
 smearing_sigma=0
 
-load_mf=True
+load_mf=False
 load_solver_label='smearing0'
 #-----------------------------------
 

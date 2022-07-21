@@ -1,6 +1,7 @@
 import numpy as np
 import h5py, time, sys, os, scipy
 from mpi4py import MPI
+from scipy.optimize import least_squares
 
 from fcdmft.solver import scf_mu
 
@@ -22,7 +23,7 @@ from pyscf.scf.hf import eig as eiggen
 
 ############################################################
 # this script performs a sanity check to make sure that
-# the embedding model solved by the same mf method (ks)
+# the embedding model solved by the same mf method (rhf)
 # recovers the imp block as in the original contact calculation
 ############################################################
 
@@ -33,13 +34,10 @@ nprocs = comm.Get_size()
 imp_atom = 'Co'
 
 # chemical potential
-mu = 0.06
+mu = 0.04
 
 # with lead or not
-with_lead = False
-
-# center of bath discretization
-disc_center = 0.1829
+with_lead = True
 
 ############################################################
 #                   gate voltage
@@ -75,22 +73,21 @@ cell_fname = contact_dir + '/cell_' + cell_label + '.chk'
 
 gdf_fname = contact_dir + '/cderi_' + cell_label + '.h5'
 
-xcfun = 'pbe0'
-method_label = 'rks_' + xcfun
+method_label = 'rhf'
 
 data_fname = contact_dir + '/data_contact_' + cell_label + '_' \
         + method_label + '_' + gate_label + '.h5'
 
-#------------ read core Hamiltonian and HF veff (built with DFT DM)  ------------
+#------------ read core Hamiltonian and HF veff ------------
 fh = h5py.File(data_fname, 'r')
 
 # imp atom block only
 hcore_lo_imp = np.asarray(fh['hcore_lo_imp'])
-JK_lo_ks_imp = np.asarray(fh['JK_lo_imp'])
+JK_lo_hf_imp = np.asarray(fh['JK_lo_imp'])
 
 # entire center region, imp + some Cu atoms
 hcore_lo_contact = np.asarray(fh['hcore_lo'])
-JK_lo_ks_contact = np.asarray(fh['JK_lo'])
+JK_lo_hf_contact = np.asarray(fh['JK_lo'])
 
 #------------ read density matrix ------------
 DM_lo_imp = np.asarray(fh['DM_lo_imp'])
@@ -131,17 +128,17 @@ spin, nkpts = hcore_lo_contact.shape[0:2]
 # hcore is a 4-d array with shape (spin, nkpts, nao, nao)
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
-    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
+    print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
-    print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
+    print('JK_lo_hf_imp.shape = ', JK_lo_hf_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('eri_lo_imp.shape = ', eri_lo_imp.shape)
     print('')
 
     print('hcore_lo_contact.dtype = ', hcore_lo_contact.dtype)
-    print('JK_lo_ks_contact.dtype = ', JK_lo_ks_contact.dtype)
+    print('JK_lo_hf_contact.dtype = ', JK_lo_hf_contact.dtype)
     print('hcore_lo_imp.dtype = ', hcore_lo_imp.dtype)
-    print('JK_lo_ks_imp.dtype = ', JK_lo_ks_imp.dtype)
+    print('JK_lo_hf_imp.dtype = ', JK_lo_hf_imp.dtype)
     print('DM_lo_imp.dtype = ', DM_lo_imp.dtype)
     print('eri_lo_imp.dtype = ', eri_lo_imp.dtype)
     print('')
@@ -151,6 +148,8 @@ if rank == 0:
     print('nao_contact = ', nao_contact)
 
     print('finish reading contact mean field data\n')
+
+    print('DM_lo_imp.diag = ', DM_lo_imp[0,0].diagonal())
 
 comm.Barrier()
 
@@ -237,58 +236,17 @@ if rank == 0:
 #               impurity Hamiltonian
 ############################################################
 hcore_lo_imp = 1./nkpts * np.sum(hcore_lo_imp, axis=1)
-JK_lo_ks_imp = 1./nkpts * np.sum(JK_lo_ks_imp, axis=1)
+JK_lo_hf_imp = 1./nkpts * np.sum(JK_lo_hf_imp, axis=1)
 DM_lo_imp = 1./nkpts * np.sum(DM_lo_imp, axis=1)
 
-#------------ build contact object ------------
-print('ready to build mf contact')
-cell = chkfile.load_cell(cell_fname)
- 
-gdf = pbcdf.GDF(cell)
-gdf._cderi = gdf_fname
-
-mf_contact = pbcscf.RKS(cell).density_fit()
-mf_contact.xc = 'pbe0'
-mf_contact.with_df = gdf
-print('mf contact built!')
-
-#------------ compute/load JK_00 ------------
 # JK_00 stands for intra-(imp val+virt) two-body mean field potential 
-# for DFT it is computed by taking the difference between veff with/without imp val+virt DM
-JK_00_fname = 'JK_00_' + imp_atom + '.h5'
-if os.path.isfile(JK_00_fname):
-    fh = h5py.File(JK_00_fname, 'r')
-    JK_00 = np.asarray(fh['JK_00'])
-    veff_ref = np.asarray(fh['veff_ref'])
-    fh.close()
-else:
-    # total DM in LO basis, imp val+virt block removed
-    DM_lo_tmp = np.copy(DM_lo_tot)
-    DM_lo_tmp[9:31,9:31] = 0
-    
-    # transform to AO basis
-    DM_ao_tmp = C_ao_lo_tot @ DM_lo_tmp @ C_ao_lo_tot.T.conj()
-    JK_ao_tmp = np.asarray(mf_contact.get_veff(dm=DM_ao_tmp))
-    
-    # transform the potential to LO basis
-    JK_lo_tmp = C_ao_lo_tot.T.conj() @ JK_ao_tmp @ C_ao_lo_tot
+JK_00 = scf_mu._get_veff(DM_lo_imp, eri_lo_imp)
 
-    # take the different for the imp val+virt block
-    JK_lo_tmp = JK_lo_tmp[np.newaxis,...]
-    JK_00 = JK_lo_ks_imp - JK_lo_tmp[:,9:31,9:31]
-
-    veff_ref = np.copy(JK_lo_tmp[0,9:31,9:31])
-
-    fh = h5py.File(JK_00_fname, 'w')
-    fh['veff_ref'] = veff_ref
-    fh['JK_00'] = JK_00
-    fh.close()
-
-Hemb_imp = hcore_lo_imp + JK_lo_ks_imp - JK_00
+Hemb_imp = hcore_lo_imp + JK_lo_hf_imp - JK_00
 
 if rank == 0:
     print('hcore_lo_imp.shape = ', hcore_lo_imp.shape)
-    print('JK_lo_ks_imp.shape = ', JK_lo_ks_imp.shape)
+    print('JK_lo_hf_imp.shape = ', JK_lo_hf_imp.shape)
     print('DM_lo_imp.shape = ', DM_lo_imp.shape)
     print('JK_00.shape = ', JK_00.shape)
     print('Hemb_imp.shape = ', Hemb_imp.shape)
@@ -307,11 +265,11 @@ comm.Barrier()
 #           contact's Green's function 
 ############################################################
 hcore_lo_contact = 1./nkpts * np.sum(hcore_lo_contact, axis=1)
-JK_lo_ks_contact = 1./nkpts * np.sum(JK_lo_ks_contact, axis=1)
+JK_lo_hf_contact = 1./nkpts * np.sum(JK_lo_hf_contact, axis=1)
 
 if rank == 0:
     print('hcore_lo_contact.shape = ', hcore_lo_contact.shape)
-    print('JK_lo_ks_contact.shape = ', JK_lo_ks_contact.shape)
+    print('JK_lo_hf_contact.shape = ', JK_lo_hf_contact.shape)
     print('')
 
 # return a 3-d array of size (spin, nao_contact, nao_contact)
@@ -333,10 +291,10 @@ def contact_Greens_function(z):
     G_C = np.zeros((spin, nao_contact, nao_contact), dtype=complex)
     for s in range(spin):
         if with_lead:
-            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] \
+            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_hf_contact[s] \
                     - Sigma_L - Sigma_R )
         else:
-            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_ks_contact[s] )
+            G_C[s,:,:] = np.linalg.inv( z*np.eye(nao_contact) - hcore_lo_contact[s] - JK_lo_hf_contact[s] )
     return G_C
 
 comm.Barrier()
@@ -363,123 +321,86 @@ def Gamma(e):
     return -1./np.pi*Sigma_imp.imag
 
 
+sigma = delta
+# broadening function, gaussian or lorentzian
+bdfun = lambda x,mu: 1.0/sigma/np.sqrt(2*np.pi)*np.exp(-0.5*((x-mu)/sigma)**2)
+#bdfun = lambda x,x0: 1.0/np.pi*sigma/((x-x0)**2+sigma**2)
+
+def fun(bath_v, bath_e, bdfun, freqs, Gamma_ref, n_hyb, nbpe):
+    nbe = len(bath_e)
+    nw = len(freqs)
+
+    Gamma = np.zeros((nw, n_hyb, n_hyb))
+    Gamma0 = np.zeros((nw, n_hyb, n_hyb))
+
+    v = bath_v.reshape((nbe, n_hyb, nbpe))
+
+    for iw in range(nw):
+        Gamma[iw,:,:] = get_Gamma(freqs[iw], bath_e, v, bdfun)
+        Gamma0[iw,:,:] = Gamma_ref(freqs[iw])
+
+    diff = Gamma-Gamma0
+    return diff.reshape(-1)
+
+
+
 ############################################################
 #               bath discretization
 ############################################################
-#------------ log discretization ------------
-wlg = -0.4
-whg = 0.6
+wlg = -0.6
+whg = 2.0
 nbe = 50 # total number of bath energies
 nbath_per_ene = 3
-
-grid_type = 'custom1'
-log_disc_base = 2.0
-wlog = 0.01
-
-grid = gen_grid(nbe, wlg, whg, disc_center, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
-
-print('grid points:', grid)
-print('number of grids:', len(grid))
-
 nbath = nbe * nbath_per_ene
 nemb = nbath + nao_imp
 
-hemb = np.zeros((spin, nemb, nemb))
+grid_type = 'linear'
+log_disc_base = 2.0
+wlog = 0.01
 
-if rank == 0:
-    print('hemb.shape = ', hemb.shape)
-    print('bath discretization starts')
-
-# one body part
-for s in range(spin):
-    Gamma_s = lambda e: Gamma(e)[s]
-    e,v = direct_disc_hyb(Gamma_s, grid, nint=30, nbath_per_ene=nbath_per_ene)
+def gen_hemb(mu):
+    grid = gen_grid(nbe, wlg, whg, mu, grid_type=grid_type, log_disc_base=log_disc_base, wlog=wlog)
+    hemb = np.zeros((spin, nemb, nemb))
     
-    hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
+    # one body part
+    for s in range(spin):
+        Gamma_s = lambda e: Gamma(e)[s]
+        e,v = direct_disc_hyb(Gamma_s, grid, nint=5, nbath_per_ene=nbath_per_ene)
+        print('v.shape = ', v.shape)
+        
+        print('optimization starts!')
+        freqs_fit = np.linspace(-0.6, 2.0, 10)
+        opt_bath_v_result = least_squares(fun, v.reshape(-1), args=(e, bdfun, freqs_fit, Gamma_s, n_hyb, nbath_per_ene))
+        print('optimization ends!')
+        v = opt_bath_v_result.x.reshape(nbe, n_hyb, nbath_per_ene)
 
-if rank == 0:
-    print('bath discretization finished')
-    print('bath energies = ', e)
+        hemb[s,:,:] = emb_ham(Hemb_imp[s,:,:], e, v)
 
-############################################################
-#               user-defined mf object
-############################################################
-class RHF2(scf.hf.RHF):
-
-    __doc__ = scf.hf.RHF.__doc__
-
-    def __init__(self, mol, mu):
-
-        scf.hf.SCF.__init__(self, mol)
-
-        self._mf = mf_contact
-        self._veff_ref = veff_ref
-        self._C_ao_lo_tot = C_ao_lo_tot
-        self._DM_lo_tot = DM_lo_tot
-        self.mu = mu
+    if rank == 0:
+        print('bath energies = ', e)
 
 
-    def get_occ(self, mo_energy=None, mo_coeff=None):
-        mo_occ = np.zeros_like(mo_energy)
-        mo_occ[mo_energy<=self.mu] = 2.0
-        return mo_occ
 
 
-    def get_veff(self, mol, dm, dm_last=0, vhf_last=0):
-        # imp def2-svp: core-9 val-6 virt-16
 
-        # given an embedding dm, extract the imp block
-        # imp val+virt has 22 orbitals
-        dm_imp = dm[:22, :22]
+    return hemb
 
-        # DM in LO basis, all orbitals (core+val+virt)
-        dm_tot_lo = np.copy(self._DM_lo_tot)
-
-        # C is the AO-to-LO transformation matrix (all LO, including core)
-        C = np.copy(self._C_ao_lo_tot)
-
-        # replace the imp val+virt block
-        dm_tot_lo[9:31,9:31] = dm_imp
-
-        # P^{AO} = C P^{LO} \dg{C}
-
-        # transform to AO basis
-        dm_tot_ao = C @ dm_tot_lo @ C.T.conj()
-
-        ## self._kmf is a pbc scf, need an extra k axis
-        #dm_tot_ao = dm_tot_ao[np.newaxis,...]
-
-        # compute veff
-        veff_ao = self._mf.get_veff(dm=dm_tot_ao)
-
-        # veff_ao is a tagged array, extract its content
-        veff_ao = np.asarray(veff_ao)
-
-        # transform to LO
-        veff_lo = C.T.conj() @ veff_ao @ C
-
-        veff_diff = veff_lo[9:31,9:31] - self._veff_ref
-
-        # veff in the embedding model
-        # only non-zero in the imp block
-        veff = np.zeros_like(dm)
-
-        # extract imp val+virt
-        veff[:22,:22] = veff_diff
-
-        #return veff, veff_lo
-        return veff
-
+# electron repulsion integral
+# only non-zero on the impurity
+#eri_imp = np.zeros([spin*(spin+1)//2, nemb, nemb, nemb, nemb])
+#eri_imp[:,:nao_imp,:nao_imp,:nao_imp,:nao_imp] = eri_lo_imp
 
 ############################################################
 #               build embedding model
 ############################################################
+hemb = gen_hemb(mu)
+
 mol = gto.M()
 mol.verbose = 4
 mol.incore_anyway = True
 mol.build()
 
-mf = RHF2(mol, mu)
+mf = RHF_imp(mol, mu, nao_imp, eri_lo_imp)
 mf.get_hcore = lambda *args: hemb[0]
 mf.get_ovlp = lambda *args: np.eye(nemb)
 mf.mo_energy = np.zeros([nemb])
@@ -489,99 +410,44 @@ mf.mo_occ = np.zeros([nemb])
 iocc = np.array(hemb[0].diagonal() < mu, dtype=float)
 dm0 = np.diag(iocc) * 2.0
 dm0[:nao_imp,:nao_imp] = DM_lo_imp.copy()
-
-#------------ sanity check ------------
-# mf.get_veff returns intra-(imp val+virt) veff
-# Cu-to-imp veff is incorporated in mf.hcore (which is Himp_imp) and is stored as mf._veff_ref
-veff_test = mf.get_veff(mol=mol,dm=dm0)
-fock_imp_test = veff_test[:22,:22] + mf.get_hcore()[:22,:22]
-fock_imp_ref = hcore_lo_imp + JK_lo_ks_imp
-fock_imp_ref = fock_imp_ref[0]
-print('sanity check: fock_imp diff = ', np.linalg.norm(fock_imp_ref-fock_imp_test))
-
-JK_lo_tot = np.dot(np.dot(C_ao_lo_tot.T.conj(), JK_ao[0]), C_ao_lo_tot)
-print('sanity check: JK_lo diff = ', np.linalg.norm(veff_test[0:22,0:22]+mf._veff_ref-JK_lo_tot[9:31,9:31]))
-#------------ sanity check end ------------
-
 mf.kernel(dm0)
+
 rdm1 = mf.make_rdm1()
 fock = hemb[0] + mf.get_veff(mol=mol, dm=rdm1)
 
+#print('rdm1 diag = ', rdm1.diagonal())
+
+#############################################################
+
+print('spin = ', spin)
 print('trace(rdm1[imp val+virt])', np.trace(rdm1[0:nao_imp,0:nao_imp]))
 print('trace(rdm1[imp val])', np.trace(rdm1[0:nval_imp,0:nval_imp]))
 print('rdm1 diff = ', np.linalg.norm(rdm1[0:nao_imp, 0:nao_imp]-DM_lo_imp[0]))
 
 
-
-
-## Fock iteration for embedding Hamiltonian
-## for commutator-DIIS
-#smearing_sigma = 0
-#def fock2fockcomm(fock_in):
-#    e,v = eiggen(fock_in, np.eye(nemb))
-#    
-#    # use fermi broadening to assist convergence
-#    #v_occ = v[:, e<mu]
-#    #dm = 2. * v_occ @ v_occ.T
-#
-#
-#    if abs(smearing_sigma) > 1e-10:
-#        occ = 2./( 1. + np.exp((e-mu)/smearing_sigma) )
-#    else:
-#        occ = np.zeros_like(e)
-#        occ[e<=mu] = 2.0
-#
-#    dm = (v*occ) @ v.T
-#
-#    fock_out = mf.get_hcore() + mf.get_veff(mol=mol, dm=dm)
-#    comm = fock_out @ dm - dm @ fock_out
-#    return fock_out, comm
-#
-#
-#fock_0 = veff_test + mf.get_hcore()
-#fock, flag = diis(fock2fockcomm, fock_0, max_iter=300)
-#
-#if flag == 0:
-#    print('fock.shape = ', fock.shape)
-#else:
-#    exit()
-#
-#e,v = eiggen(fock, np.eye(nemb))
-#
-#if abs(smearing_sigma) > 1e-10:
-#    occ = 2./( 1. + np.exp((e-mu)/smearing_sigma) )
-#else:
-#    occ = np.zeros_like(e)
-#    occ[e<=mu] = 2.0
-#rdm1 = (v*occ) @ v.T
-
-
-#############################################################
-
-
 #------------ compute & plot imp LDoS ------------
-
 if spin == 1:
     fock = fock[np.newaxis,...]
 
-wld = -0.4
-whd = 0.8
+wld = -1.0
+whd = 2.5
 nwd = 400
 eta = 0.03
 freqs = np.linspace(wld,whd,nwd)
 
-# imp ldos from embedding model
+# new imp ldos from embedding model
 A = np.zeros((spin,nwd,nval_imp))
 for s in range(spin):
     for iw in range(nwd):
         z = freqs[iw] + 1j*eta
 
+        #gf = np.linalg.inv(z*np.eye(nemb) - fock[s,:,:])
         gf_mo = np.diag(1./(z-mf.mo_energy))
         gf_ao = mf.mo_coeff @ gf_mo @ mf.mo_coeff.T
 
         A[s,iw,:] = -1./np.pi*np.diag(gf_ao[0:nval_imp,0:nval_imp]).imag
 
-# mean-field LDoS from contact Green's function
+# raw mean-field LDoS from contact Green's function
 ldos_ref = np.zeros((spin,nwd,nval_imp))
 for iw in range(nwd):
     z = freqs[iw] + 1j*eta
@@ -589,13 +455,19 @@ for iw in range(nwd):
     for s in range(spin):
         ldos_ref[s,iw,:] = -1./np.pi*np.diag(GC[s,:nval_imp, :nval_imp]).imag
 
-fh = h5py.File('imp_rks_ldos_nbe%i_nbpe%i_mu%5.3f_gate%5.3f.h5'%(nbe, nbath_per_ene, mu, gate), 'w')
+if with_lead:
+    fname = 'imp_lead_rhf_ldos_nbe%i_nbpe%i_mu%5.3f_gate%5.3f.h5'%(nbe, nbath_per_ene, mu, gate)
+else:
+    fname = 'imp_rhf_ldos_nbe%i_nbpe%i_mu%5.3f_gate%5.3f.h5'%(nbe, nbath_per_ene, mu, gate)
+
+fh = h5py.File(fname, 'w')
 fh['freqs'] = freqs
 fh['A'] = A[0,:,:]
 fh['ldos_ref'] = ldos_ref[0,:,:]
 fh['nbe'] = nbe
 fh['nbath_per_ene'] = nbath_per_ene
 fh.close()
+
 
 
 
