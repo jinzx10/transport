@@ -172,7 +172,7 @@ def gen_cas_cisd(emb_mf):
             print('CISD starts from scratch')
             emb_cisd.kernel()
 
-        emb_cisd.dump_chk()
+        #emb_cisd.dump_chk()
 
         ## always run CISD from scratch
         #print('CISD starts')
@@ -733,20 +733,20 @@ def get_emb_mf(mu):
     emb_mf.diis_space = 15
 
     if rank == 0:
-        ## newton-diis-newton to ensure convergence
-        #emb_mf_newton = emb_mf.newton()
-        #emb_mf_newton.max_cycle = 150
-        #emb_mf_newton.canonicalization = False
-        #emb_mf_newton.kernel(dm0=dm_init)
-        #dm0 = emb_mf_newton.make_rdm1()
+        # newton-diis-newton to ensure convergence
+        emb_mf_newton = emb_mf.newton()
+        emb_mf_newton.max_cycle = 150
+        emb_mf_newton.canonicalization = False
+        emb_mf_newton.kernel(dm0=dm_init)
+        dm0 = emb_mf_newton.make_rdm1()
 
-        #emb_mf.kernel(dm0=dm0)
-        #dm0 = emb_mf.make_rdm1()
+        emb_mf.kernel(dm0=dm0)
+        dm0 = emb_mf.make_rdm1()
 
-        #emb_mf = emb_mf.newton()
-        #emb_mf.canonicalization = False
-        #emb_mf.kernel(dm0=dm0)
-        emb_mf.kernel(dm_init)
+        emb_mf = emb_mf.newton()
+        emb_mf.canonicalization = False
+        emb_mf.kernel(dm0=dm0)
+        #emb_mf.kernel(dm_init)
 
     emb_mf.mo_coeff = comm.bcast(emb_mf.mo_coeff, root=0)
     emb_mf.mo_energy = comm.bcast(emb_mf.mo_energy, root=0)
