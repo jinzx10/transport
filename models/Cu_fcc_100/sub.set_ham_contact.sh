@@ -25,22 +25,15 @@ Cu_basis=`grep 'Cu_basis = ' set_ham_contact.py | cut --delimiter="'" --fields=2
 #-----------------------------------
 imp_atom=Co
 use_dft=False
-xcfun=pbe0
+xcfun=pbe
 do_restricted=True
-plot_orb=True
+plot_lo=True
 
-if [[ ${imp_atom} == "Co" ]]; then
-    nl=4
-else
-    nl=2
-fi
-
-nr=3
 left=1.8
 right=1.8
 latconst=3.6
 
-cell=${imp_atom}_${imp_basis}_Cu_${Cu_basis}_nl${nl}_nr${nr}_l${left}_r${right}_a${latconst}
+cell=${imp_atom}_${imp_basis}_Cu_${Cu_basis}_l${left}_r${right}_a${latconst}
 
 #-----------------------------------
 #gate_list=(`seq 0 0.001 0.2`)
@@ -51,7 +44,7 @@ cell=${imp_atom}_${imp_basis}_Cu_${Cu_basis}_nl${nl}_nr${nr}_l${left}_r${right}_
 #
 #echo 'idx_last = ' ${idx_last}
 #echo 'gate_last = ' ${gate_last}
-gate=0.000
+gate=0.00
 
 #-----------------------------------
 if [[ ${do_restricted} == "True" ]]; then
@@ -68,11 +61,11 @@ fi
 
 #-----------------------------------
 #mf_load_fname=${imp_atom}/${cell}_${method}_gate${gate_last}.chk
-mf_load_fname=${imp_atom}/${cell}_${method}_gate0.000.chk
+mf_load_fname="${imp_atom}/${cell}_${method}_gate0.00.chk"
 
 echo 'mf_load_fname' ${mf_load_fname}
 
-suffix=a${latconst}_nl${nl}_nr${nr}_l${left}_r${right}_${method}_gate${gate}_${imp_basis}_${Cu_basis}
+suffix=a${latconst}_l${left}_r${right}_${method}_gate${gate}_${imp_basis}_${Cu_basis}
 
 script=set_ham_contact_${imp_atom}_${suffix}.py
 output=set_ham_contact_${imp_atom}_${suffix}.out
@@ -81,18 +74,16 @@ datadir=${dir}/${imp_atom}
 
 mkdir -p ${datadir}
 
-sed -e"s/TEST/production/" \
+sed -e"s/MODE/production/" \
     -e"s/IMP_ATOM/${imp_atom}/" \
     -e"s/DO_RESTRICTED/${do_restricted}/" \
     -e"s/USE_DFT/${use_dft}/" \
     -e"s/XCFUN/${xcfun}/" \
-    -e"s/NUM_LEFT/${nl}/" \
-    -e"s/NUM_RIGHT/${nr}/" \
     -e"s/LEFT/${left}/" \
     -e"s/RIGHT/${right}/" \
     -e"s/LATCONST/${latconst}/" \
     -e"s/GATE/${gate}/" \
-    -e"s/PLOT_ORB/${plot_orb}/" \
+    -e"s/PLOT_LO/${plot_lo}/" \
     -e"s:MF_LOAD_FNAME:${mf_load_fname}:" \
     set_ham_contact.py > ${script}
 

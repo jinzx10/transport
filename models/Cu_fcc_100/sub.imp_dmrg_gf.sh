@@ -2,12 +2,11 @@
 
 #SBATCH --partition=parallel
 #SBATCH --nodes=1
-#SBATCH --time=28:00:00
+#SBATCH --time=24:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=28
-#SBATCH --job-name=gf-Co-0.19
+#SBATCH --job-name=gf-Co-0.17
 #SBATCH --array=0-4
-#SBATCH --dependency=afterany:411822
 
 source $HOME/.bashrc
 
@@ -32,13 +31,13 @@ timestamp=`date +%y%m%d-%H%M%S`
 imp_atom=Co
 nocc_act=6
 nvir_act=9
-chem_pot=0.19
-suffix=seg0
+chem_pot=0.17
 
 gate=0.000
 
 segs=(0 1 2 3 4)
 segment=${segs[${SLURM_ARRAY_TASK_ID}]}
+suffix=seg${segment}
 
 #-----------------------------------
 
