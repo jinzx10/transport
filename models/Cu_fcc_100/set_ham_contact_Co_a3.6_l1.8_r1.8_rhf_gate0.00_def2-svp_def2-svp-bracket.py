@@ -14,12 +14,12 @@ from pyscf.scf.hf import eig as eiggen
 import matplotlib.pyplot as plt
 
 # switch to 'production' for serious jobs
-mode = 'MODE'
+mode = 'production'
 
 ############################################################
 #                       basis
 ############################################################
-imp_atom = 'IMP_ATOM' if mode == 'production' else 'Co'
+imp_atom = 'Co' if mode == 'production' else 'Co'
 
 imp_basis = 'def2-svp'
 Cu_basis = 'def2-svp-bracket'
@@ -46,8 +46,8 @@ if not os.path.exists(datadir):
 # |-l-1.5a   -l-a   -l-0.5a   -l   0(imp)   r    r+0.5a   r+a     | r+1.5a
 
 # x-distance between impurity atom and nearest Cu plane
-l = LEFT if mode == 'production' else 1.8
-r = RIGHT if mode == 'production' else 1.8
+l = 1.8 if mode == 'production' else 1.8
+r = 1.8 if mode == 'production' else 1.8
 
 # number of layers in the left/right lead included in contact SCF calculation
 # make sure total number of electrons in a unit cell is even
@@ -55,7 +55,7 @@ nl = 4 if imp_atom == 'Co' else 2
 nr = 3
 
 # Cu lattice constant (for the fcc cell)
-a = LATCONST if mode == 'production' else 3.6
+a = 3.6 if mode == 'production' else 3.6
 
 cell_label = imp_atom + '_' + imp_basis + '_Cu_' + Cu_basis \
         + '_l' + str(l) + '_r' + str(r) + '_a' + str(a)
@@ -157,7 +157,7 @@ exit()
 ############################################################
 #                   gate voltage
 ############################################################
-gate = GATE if mode == 'production' else 0
+gate = 0.00 if mode == 'production' else 0
 gate_label = 'gate%5.3f'%(gate)
 
 ############################################################
@@ -169,12 +169,12 @@ gate_label = 'gate%5.3f'%(gate)
 # will use HF veff from the previous DM anyway (even though it's a KS-converged DM)
 
 # if False, use HF instead
-use_dft = USE_DFT if mode == 'production' else True
+use_dft = False if mode == 'production' else True
 
 # if use_dft
-xcfun = 'XCFUN' if mode == 'production' else 'pbe0'
+xcfun = 'pbe' if mode == 'production' else 'pbe0'
 
-do_restricted = DO_RESTRICTED if mode == 'production' else True
+do_restricted = True if mode == 'production' else True
 
 if do_restricted:
     method_label = 'r'
@@ -252,7 +252,7 @@ mf.get_ovlp = lambda *args: ovlp
 ############################################################
 mf_save_fname = datadir + '/' + cell_label + '_' + method_label + '_' + gate_label + '.chk'
 
-mf_load_fname = 'MF_LOAD_FNAME' if mode == 'production' else None
+mf_load_fname = 'Co/Co_def2-svp_Cu_def2-svp-bracket_l1.8_r1.8_a3.6_rhf_gate0.00.chk' if mode == 'production' else None
 
 if mf_load_fname is not None:
     mf_data = chkfile.load(mf_load_fname, 'scf')
@@ -509,7 +509,7 @@ if np.max(np.abs(C_ao_lo_tot.imag)) < 1e-8:
 ############################################################
 #           Plot imp LO
 ############################################################
-plot_lo = PLOT_LO if mode == 'production' else True
+plot_lo = True if mode == 'production' else True
 
 if plot_lo:
     plotdir = datadir + '/plot_' + cell_label + '_' + method_label + '_' + gate_label

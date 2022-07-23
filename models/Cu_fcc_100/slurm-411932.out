@@ -1,0 +1,4 @@
+mf_load_fname Co/Co_def2-svp_Cu_def2-svp-bracket_l1.8_r1.8_a3.6_rhf_gate0.00.chk
+imp atom =  Co
+mf_load_fname =  Co/Co_def2-svp_Cu_def2-svp-bracket_l1.8_r1.8_a3.6_rhf_gate0.00.chk
+suffix =  a3.6_l1.8_r1.8_rhf_gate0.00_def2-svp_def2-svp-bracket

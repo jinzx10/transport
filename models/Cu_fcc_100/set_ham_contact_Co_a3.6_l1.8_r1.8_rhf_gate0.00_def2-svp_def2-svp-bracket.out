@@ -1,0 +1,8 @@
+Jul 22 17:41:12 ####### 
+                ####### libDMET   version 0.4
+                ####### A periodic DMET library for lattice model and realistic solid.
+                ####### 
+data will be saved to: /home/zuxin/projects/transport/models/Cu_fcc_100/Co/
+use saved cell file: /home/zuxin/projects/transport/models/Cu_fcc_100/Co//cell_Co_def2-svp_Cu_def2-svp-bracket_l1.8_r1.8_a3.6.chk
+use saved gdf cderi: /home/zuxin/projects/transport/models/Cu_fcc_100/Co//cderi_Co_def2-svp_Cu_def2-svp-bracket_l1.8_r1.8_a3.6.h5
+number of impurity AO orbitals =  31
