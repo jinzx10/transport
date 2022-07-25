@@ -63,7 +63,7 @@ script=set_ham_contact_${labels}.py
 output=set_ham_contact_${labels}.out
 
 #-------------- data directory ----------------
-datadir=${dir}/${imp_atom}/
+datadir=${work}/${imp_atom}/
 mkdir -p ${datadir}
 
 #-------------- summary ----------------
