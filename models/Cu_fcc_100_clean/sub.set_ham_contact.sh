@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --time=48:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=14
-#SBATCH --mem=60G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=50G
 #SBATCH --job-name=set_ham_contact
 ##SBATCH --array=51-100%1
 
@@ -13,9 +13,12 @@ source $HOME/.bashrc
 conda activate
 
 export MKL_NUM_THREADS=1
-export OMP_NUM_THREADS=14
+export OMP_NUM_THREADS=8
 
 dir=$HOME/projects/transport/models/Cu_fcc_100_clean/
+work=$HOME/projects/transport/models/Cu_fcc_100_clean/
+
+mkdir -p ${work}
 cd ${dir}
 
 #------------ cell ----------------
@@ -54,19 +57,22 @@ labels=${cell}_k${kmesh}_${method}_gate${gate}
 
 #-------------- job control ----------------
 plot_lo=True
-
 mf_load_fname=
-
-echo 'mf_load_fname' ${mf_load_fname}
-
 
 script=set_ham_contact_${labels}.py
 output=set_ham_contact_${labels}.out
 
+#-------------- data directory ----------------
 datadir=${dir}/${imp_atom}/
-
 mkdir -p ${datadir}
 
+#-------------- summary ----------------
+echo 'labels = ' ${labels}
+echo 'plot_lo = ' ${plot_lo}
+echo 'mf_load_fname = ' ${mf_load_fname}
+echo 'datadir = ' ${datadir}
+
+#-------------- generate script ----------------
 sed -e"s/MODE/production/" \
     -e"s/IMP_ATOM/${imp_atom}/" \
     -e"s/XCFUN/${xcfun}/" \
@@ -77,13 +83,12 @@ sed -e"s/MODE/production/" \
     -e"s/KMESH/${kmesh}/" \
     -e"s/PLOT_LO/${plot_lo}/" \
     -e"s:MF_LOAD_FNAME:${mf_load_fname}:" \
-    set_ham_contact.py > ${script}
+    -e"s:DATADIR:${datadir}:" \
+    set_ham_contact.py > ${work}/${script}
 
-echo 'imp atom = ' ${imp_atom}
-echo 'mf_load_fname = ' ${mf_load_fname}
-echo 'labels = ' ${labels}
-
-python -u ${script} --datadir=${datadir} > ${output} 2>&1
+#-------------- run ----------------
+cd ${work}
+python -u ${script} > ${output} 2>&1
 mv ${script} ${output} ${datadir}
 
 

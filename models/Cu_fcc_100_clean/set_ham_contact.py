@@ -25,11 +25,7 @@ Cu_basis = 'def2-svp-bracket'
 ############################################################
 #           directory for saving/loading data
 ############################################################
-parser = argparse.ArgumentParser()
-parser.add_argument('--datadir', default = 'data', type = str)
-args = parser.parse_args()
-
-datadir = args.datadir + '/'
+datadir = 'DATADIR/' if mode == 'production' else 'Co/'
 print('data will be saved to:', datadir)
 
 if not os.path.exists(datadir):
@@ -40,8 +36,8 @@ if not os.path.exists(datadir):
 ############################################################
 # transport direction fcc 100 plane
 # an example of nl=2, nr=3
-# |     5      4     1      4      5       4      |   5
-# | -l-0.5a   -l   0(imp)   r    r+0.5a   r+a     | r+1.5a
+# number of atoms |     5      4     1      4      5       4      |   5
+# x position      | -l-0.5a   -l   0(imp)   r    r+0.5a   r+a     | r+1.5a
 
 # x-distance between impurity atom and nearest Cu plane
 l = LEFT if mode == 'production' else 1.8
