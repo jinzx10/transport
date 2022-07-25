@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --time=48:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=28
-#SBATCH --mem=120G
+#SBATCH --cpus-per-task=14
+#SBATCH --mem=60G
 #SBATCH --job-name=set_ham_contact
 ##SBATCH --array=51-100%1
 
@@ -13,7 +13,7 @@ source $HOME/.bashrc
 conda activate
 
 export MKL_NUM_THREADS=1
-export OMP_NUM_THREADS=28
+export OMP_NUM_THREADS=14
 
 dir=$HOME/projects/transport/models/Cu_fcc_100_clean/
 cd ${dir}

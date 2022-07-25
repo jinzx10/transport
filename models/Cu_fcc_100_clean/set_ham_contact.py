@@ -153,7 +153,7 @@ exit()
 ############################################################
 #               Brillouin zone sampling
 ############################################################
-k_label = 'kKMESH'
+k_label = 'kKMESH' if mode == 'production' else 'k311'
 kpts = cell.make_kpts([int(k_label[1]), int(k_label[2]), int(k_label[3])])
 nkpts = len(kpts)
 print('nkpts = ', nkpts)
@@ -201,6 +201,7 @@ labels = cell_label + '_' + k_label + '_' + method_label + '_' + gate_label
 
 # save hcore at gate == 0 for reference
 ref_fname = datadir + '/ref_contact_' + labels + '.h5'
+print('ref_fname = ', ref_fname)
 
 if gate == 0 and not os.path.isfile(ref_fname):
     fh = h5py.File(ref_fname, 'w')
@@ -212,7 +213,7 @@ if gate == 0 and not os.path.isfile(ref_fname):
     fh.close()
 
 # read reference hcore if possible
-if os.path.isfile(ref_name):
+if os.path.isfile(ref_fname):
     fh = h5py.File(ref_fname, 'r')
     print('loading hcore...')
     hcore = np.asarray(fh['hcore'])
